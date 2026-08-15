@@ -1,5 +1,7 @@
 # PDF Password Recovery
 
+**中文** | [English](README_EN.md)
+
 面向自有或已获授权文件的本地 PDF 密码恢复工具。项目提供 Windows 多进程 CPU 后端、可选的 hashcat GPU 后端、字典/规则/掩码/有限穷举策略，以及可恢复的检查点。
 
 > 仅可处理你有权访问的本地 PDF。请勿用于未经授权的文件或系统。
