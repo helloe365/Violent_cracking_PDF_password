@@ -1,122 +1,226 @@
-# PDF密码暴力破解工具 | PDF Password Brute Force Cracker
+# PDF Password Recovery
 
-## 简介 | Introduction
+面向自有或已获授权文件的本地 PDF 密码恢复工具。项目提供 Windows 多进程 CPU 后端、可选的 hashcat GPU 后端、字典/规则/掩码/有限穷举策略，以及可恢复的检查点。
 
-这是一个用Python编写的PDF密码暴力破解工具，能够通过尝试不同组合的密码来破解受密码保护的PDF文件。该工具利用多进程技术加速破解过程，并按照不同的密码类型和长度有序地尝试可能的组合。
+> 仅可处理你有权访问的本地 PDF。请勿用于未经授权的文件或系统。
 
-This is a PDF password brute force cracking tool written in Python that can crack password-protected PDF files by trying different password combinations. The tool utilizes multiprocessing technology to accelerate the cracking process and systematically attempts possible combinations according to different password types and lengths.
+## 功能概览
 
-## 功能特点 | Features
+- CPU：多进程、流式候选、有限队列，不把搜索空间整体载入内存。
+- GPU：通过 hashcat 和 pdf2john 使用独立显卡，并实时显示速度与进度。
+- 攻击方式：字典、hashcat 风格掩码、自定义字符集和限定长度穷举。
+- 智能编排：常用字典 → 高频规则变形 → 动态掩码 → `alnum` 有限穷举。
+- 恢复：CPU checkpoint 与 hashcat restore；状态文件不保存找到的明文密码。
+- 内置字典：SecLists `Pwdb_top-10000000.txt`，共 1000 万行。
+- 无运行时间上限；需要停止时按 `Ctrl+C`，之后可恢复明确中断的阶段。
 
-- **多进程支持**：利用多核CPU加速破解过程
-- **智能尝试顺序**：按照常见密码类型优先级尝试（纯数字、纯字母、混合字符）
-- **进度显示**：实时显示破解进度和预估时间
-- **灵活配置**：可自定义密码长度范围和使用的进程数
-- **用户友好**：简单的命令行交互界面
+## 环境要求
 
----
+- Windows 10/11
+- Python 3.11+
+- CPU 模式无需外部程序
+- GPU 模式需要 hashcat 与 John the Ripper Jumbo 的 pdf2john
 
-- **Multiprocessing Support**: Utilizes multi-core CPUs to accelerate the cracking process
-- **Intelligent Attempt Order**: Tries passwords based on common password type priorities (digits only, letters only, mixed characters)
-- **Progress Display**: Shows real-time cracking progress and estimated time
-- **Flexible Configuration**: Customizable password length range and number of processes
-- **User-Friendly**: Simple command-line interface
+## 安装
 
-## 安装要求 | Requirements
-
-- Python 3.6+
-- PyPDF2
-- tqdm
-
-安装依赖：
-
-Install dependencies:
-
-```bash
-pip install PyPDF2 tqdm
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -U pip
+python -m pip install -e ".[dev]"
 ```
 
-## 使用方法 | Usage
+查看帮助：
 
-1. 克隆或下载此仓库
-2. 运行主程序文件：
-
----
-
-1. Clone or download this repository
-2. Run the main program file:
-
-```bash
-python Violent_cracking_PDF_password.py
+```powershell
+pdf-password-recovery --help
+python -m pdf_password_recovery --help
 ```
 
-3. 按照提示输入PDF文件路径和参数
-4. 等待程序尝试破解密码
+# 快速开始
 
----
+# 零参数向导 -- 使用这个就可以
 
-3. Follow the prompts to enter the PDF file path and parameters
-4. Wait for the program to attempt to crack the password
-
-## 参数说明 | Parameters
-
-- **PDF文件路径**：需要破解的PDF文件的完整路径
-- **最小密码长度**：尝试的最小密码长度（默认为4）
-- **最大密码长度**：尝试的最大密码长度（默认为6）
-- **进程数**：用于破解的进程数量（默认为CPU核心数）
-
----
-
-- **PDF File Path**: Complete path to the PDF file that needs to be cracked
-- **Minimum Password Length**: Minimum password length to try (default is 4)
-- **Maximum Password Length**: Maximum password length to try (default is 6)
-- **Number of Processes**: Number of processes used for cracking (default is the number of CPU cores)
-
-## 示例 | Example
-
-```
-请输入PDF文件的完整路径: C:\Users\Documents\protected.pdf
-请输入最小密码长度,默认为 [4]: 3
-请输入最大密码长度,默认为 [6]: 5
-请输入使用的进程数 (1-8) [8]: 4
-
-开始破解密码...
-使用 4 个进程进行破解
-
-尝试长度为 3 的密码...
-
-尝试纯数字密码...
-可能的组合数: 1000
-尝试纯数字: 100%|██████████| 1/1 [00:00<00:00, 10.42it/s]
-
-尝试纯字母(小写)密码...
-可能的组合数: 17576
-尝试纯字母(小写): 100%|██████████| 2/2 [00:01<00:00,  1.95it/s]
-
-成功! 密码是: abc
-密码长度: 3
-密码类型: 纯字母(小写)
-耗时: 1.03秒
-
-破解成功! PDF密码是: abc
+```powershell
+pdf-password-recovery
 ```
 
-## 注意事项 | Notes
+零参数入口会进入中文智能向导，依次询问 PDF 路径、最小长度、最大长度和 CPU 回退进程数。确认后按“常用字典 → 规则变形 → 动态掩码 → 有限穷举”执行，默认长度为 `4–6`。后端为 `auto`：优先使用 GPU/hashcat，不可用时回退 CPU。
 
-- 密码破解时间与密码复杂度和长度成指数关系增长
-- 对于长度超过6位的复杂密码，破解可能需要很长时间
-- 本工具仅用于合法用途，如找回自己的PDF文件密码
-- 请勿用于非法目的或未经授权的文件破解
+检测到匹配的未完成智能任务时，向导会询问继续恢复还是重新开始。流程没有运行时间上限，需要停止时按 `Ctrl+C`。
 
----
+### 字典攻击
 
-- Password cracking time increases exponentially with password complexity and length
-- For complex passwords longer than 6 characters, cracking may take a very long time
-- This tool is intended for legitimate purposes only, such as recovering your own PDF file passwords
-- Do not use for illegal purposes or unauthorized file cracking
+```powershell
+pdf-password-recovery protected.pdf `
+  --attack dictionary `
+  --wordlist words.txt `
+  --backend auto
+```
 
-## 许可证 | License
+### 掩码攻击
 
-本项目采用 MIT 许可证 - 详情请查看 LICENSE 文件
+```powershell
+pdf-password-recovery protected.pdf `
+  --attack mask `
+  --mask "?u?l?l?l?d?d" `
+  --backend auto
+```
 
-This project is licensed under the MIT License - see the LICENSE file for details
+掩码标记：
+
+| 标记   | 候选字符               |
+| ------ | ---------------------- |
+| `?d` | 数字                   |
+| `?l` | 小写字母               |
+| `?u` | 大写字母               |
+| `?a` | 95 个可打印 ASCII 字符 |
+| `??` | 字面问号               |
+
+### 有限穷举
+
+```powershell
+pdf-password-recovery protected.pdf `
+  --attack brute `
+  --charset alnum `
+  --min-length 4 `
+  --max-length 6 `
+  --workers 8 `
+  --backend auto
+```
+
+字符集预设包括 `digits`、`lower`、`upper`、`letters` 和 `alnum`。也可以直接传入自定义字符集；重复字符会按首次出现顺序去重。
+
+非交互运行必须明确指定攻击方式并添加 `--yes`：
+
+```powershell
+pdf-password-recovery protected.pdf --attack brute --charset digits `
+  --min-length 1 --max-length 8 --backend cpu --yes
+```
+
+## 智能流程与 API
+
+智能编排器按以下顺序运行，并对所有阶段应用同一长度范围：
+
+1. 内置 1000 万常用密码字典。
+2. 固定高频规则变形，包括大小写、首字母大写、常用数字/符号追加及基础 leet 替换。
+3. 按长度生成纯数字、纯小写、纯大写，以及“首字母大写 + 小写主体 + 两位数字”掩码。
+4. 最后执行限定长度的 `alnum` 穷举，不自动扩大最大长度。
+
+除零参数向导外，也可通过 Python API 调用：
+
+```python
+from pathlib import Path
+
+from pdf_password_recovery.smart import SmartOptions, run_smart
+
+result = run_smart(
+    SmartOptions(
+        pdf_path=Path(r"C:\docs\protected.pdf"),
+        min_length=4,
+        max_length=6,
+        workers=4,
+    ),
+    notice=print,
+    confirm_resume=lambda: True,
+)
+
+print(result.status)
+if result.password is not None:
+    print(result.password)
+```
+
+智能状态会校验 PDF、内置字典、规则版本和长度范围。只有后端明确返回中断状态时才恢复当前阶段；普通运行异常会在下次从该阶段重新开始，已经耗尽的阶段仍会跳过。
+
+## GPU/hashcat 配置
+
+工具按以下顺序寻找 hashcat 与 pdf2john：
+
+1. 环境变量 `PDF_PASSWORD_RECOVERY_HASHCAT`、`PDF_PASSWORD_RECOVERY_PDF2JOHN`。
+2. 当前 `PATH`。
+3. 开发仓库的 `downloads/gpu-tools/`。
+
+安装后先检查：
+
+```powershell
+hashcat -I
+Get-Command hashcat,pdf2john,pdf2john.py,pdf2john.pl
+```
+
+hashcat 固定使用 GPU 类型设备。若同时检测到独显和共享内存核显，会优先选择非共享显存设备。`--backend auto` 只会在候选开始前回退 CPU；显式指定 `--backend hashcat` 时，GPU 工具或兼容模式不可用会直接报错。
+
+## 中断与恢复
+
+高级 CLI 使用安全的会话名保存状态：
+
+```powershell
+pdf-password-recovery protected.pdf --attack brute --charset digits `
+  --min-length 1 --max-length 8 --backend cpu --session numeric
+```
+
+按 `Ctrl+C` 后，使用完全相同的 PDF、攻击参数和会话名恢复：
+
+```powershell
+pdf-password-recovery protected.pdf --attack brute --charset digits `
+  --min-length 1 --max-length 8 --backend cpu --session numeric --resume
+```
+
+恢复过程会校验 PDF、字典和攻击配置指纹。不要在恢复前替换输入文件或改变搜索参数。
+
+## 内置字典来源
+
+内置字典来自 SecLists，并固定到提交 `066f6c8b8339fb5c10ffeca1d2f845d054081974`：
+
+- 文件：`Passwords/Common-Credentials/Pwdb_top-10000000.txt`
+- 行数：`10,000,000`
+- 大小：`94,461,698` 字节
+- SHA-256：`18dc49ca32b62455a61e3398f4ab9f93eb700ff142fa0d4b9fd11a727f3b80e4`
+- 许可证：SecLists MIT License，随 package data 一同提供
+
+字典随安装包提供，运行时不会联网下载，也不会在内存中整体展开。
+
+## 常用参数
+
+| 参数                                | 说明                                    |
+| ----------------------------------- | --------------------------------------- |
+| `--attack`                        | `dictionary`、`mask` 或 `brute`   |
+| `--backend`                       | `auto`、`hashcat` 或 `cpu`        |
+| `--wordlist`                      | 字典文件路径                            |
+| `--encoding`                      | 字典编码，默认 UTF-8                    |
+| `--mask`                          | hashcat 风格掩码                        |
+| `--charset`                       | 预设或自定义字符集                      |
+| `--min-length` / `--max-length` | 穷举长度闭区间                          |
+| `--workers`                       | CPU 工作进程数；不控制 GPU 并发         |
+| `--session`                       | 检查点或 hashcat 会话名                 |
+| `--resume`                        | 恢复指定会话，必须同时提供`--session` |
+| `--output`                        | 成功后原子写入密码文件                  |
+| `--yes`                           | 非交互环境跳过确认                      |
+
+## 开发与验证
+
+```powershell
+python -m pytest --cov=pdf_password_recovery --cov-fail-under=80
+python -m ruff check .
+python -m ruff format --check .
+python -m build
+python benchmarks\benchmark_cpu.py --candidates 1000 --batch-size 100
+```
+
+外部工具集成测试默认跳过。确认本机 hashcat、pdf2john 和 GPU 环境可用后执行：
+
+```powershell
+$env:RUN_EXTERNAL_TOOL_TESTS = "1"
+python -m pytest tests\test_external_tools.py -v
+```
+
+## 安全与数据
+
+- 只读取命令中明确提供的本地 PDF 和字典文件。
+- 不包含网络扫描、远程目标发现、批量目标搜索、隐蔽或规避检测功能。
+- 检查点与智能状态不保存找到的明文密码。
+- 成功密码默认仅输出到终端；只有指定 `--output` 时才写入文件。
+- 会话和状态默认保存在系统用户数据目录，可用 `PDF_PASSWORD_RECOVERY_STATE_DIR` 指定其他位置。
+
+## License
+
+项目代码采用 MIT License。内置 SecLists 字典的许可证与来源信息位于 `src/pdf_password_recovery/data/`。
