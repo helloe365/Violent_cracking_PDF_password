@@ -41,7 +41,7 @@ python -m pdf_password_recovery --help
 
 # 快速开始
 
-# 零参数向导 -- 使用这个就可以
+# 零参数向导 -- 直接使用这个就可以
 
 ```powershell
 pdf-password-recovery
