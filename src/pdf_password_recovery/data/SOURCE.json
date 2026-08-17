@@ -1,0 +1,8 @@
+{
+  "source_url": "https://raw.githubusercontent.com/danielmiessler/SecLists/066f6c8b8339fb5c10ffeca1d2f845d054081974/Passwords/Common-Credentials/Pwdb_top-10000000.txt",
+  "source_commit": "066f6c8b8339fb5c10ffeca1d2f845d054081974",
+  "size": 94461698,
+  "lines": 10000000,
+  "sha256": "18dc49ca32b62455a61e3398f4ab9f93eb700ff142fa0d4b9fd11a727f3b80e4",
+  "ruleset_version": 1
+}

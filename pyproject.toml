@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pdf-password-recovery"
+version = "1.0.0"
+description = "Authorized local PDF password recovery with CPU and hashcat backends"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+dependencies = [
+  "pypdf[crypto]>=5.0,<7",
+  "tqdm>=4.66,<5",
+]
+
+[project.optional-dependencies]
+dev = [
+  "build>=1.2,<2",
+  "psutil>=6,<8",
+  "pytest>=8,<10",
+  "pytest-cov>=6,<8",
+  "ruff>=0.9,<1",
+]
+
+[project.scripts]
+pdf-password-recovery = "pdf_password_recovery.cli:entrypoint"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+pdf_password_recovery = ["data/*"]
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+testpaths = ["tests"]
+markers = ["external: requires real hashcat and pdf2john tools"]
+
+[tool.coverage.run]
+branch = true
+source = ["pdf_password_recovery"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
