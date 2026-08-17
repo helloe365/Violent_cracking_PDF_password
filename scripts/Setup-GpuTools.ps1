@@ -164,13 +164,15 @@ Assert-ExistingFile -Path $manifestFullPath -Description 'Release manifest'
 try { $manifest = Get-Content -LiteralPath $manifestFullPath -Raw | ConvertFrom-Json }
 catch { throw "Release manifest is invalid JSON: $manifestFullPath" }
 Assert-ReleaseManifest -Manifest $manifest
+$manifest.sha256 = ([string]$manifest.sha256).ToLowerInvariant()
 
 if ([string]::IsNullOrWhiteSpace($DestinationRoot)) { $DestinationRoot = Join-Path $downloadsRoot 'gpu-tools' }
 $destinationFullPath = [System.IO.Path]::GetFullPath($DestinationRoot)
 if (Test-Path -LiteralPath $destinationFullPath) {
     if (Test-MatchingInstallation -Root $destinationFullPath -Manifest $manifest) {
         Write-Host "GPU tools already verified at $destinationFullPath"
-        exit 0
+        $global:LASTEXITCODE = 0
+        return
     }
 }
 
@@ -222,12 +224,16 @@ try {
         $hashcatDirectory = Join-Path $destinationFullPath 'hashcat-7.1.2'
         $hashcatExecutable = Join-Path $hashcatDirectory 'hashcat.exe'
         try {
-            Push-Location -LiteralPath $hashcatDirectory
-            try {
-                $inventory = & $hashcatExecutable -I 2>&1
-                $inventoryExitCode = $LASTEXITCODE
+            $inventoryStandardOutput = Join-Path $stagingRoot 'hashcat-inventory.stdout'
+            $inventoryStandardError = Join-Path $stagingRoot 'hashcat-inventory.stderr'
+            $inventoryProcess = Start-Process -FilePath $hashcatExecutable -ArgumentList '-I' -WorkingDirectory $hashcatDirectory -Wait -PassThru -NoNewWindow -RedirectStandardOutput $inventoryStandardOutput -RedirectStandardError $inventoryStandardError
+            $inventory = @()
+            foreach ($inventoryPath in @($inventoryStandardOutput, $inventoryStandardError)) {
+                if (Test-Path -LiteralPath $inventoryPath -PathType Leaf) {
+                    $inventory += Get-Content -LiteralPath $inventoryPath -Raw
+                }
             }
-            finally { Pop-Location }
+            $inventoryExitCode = $inventoryProcess.ExitCode
             $hasGpu = (@($inventory) -join [Environment]::NewLine) -match '(?im)^\s*Type[^:]*:\s*GPU\b'
             if ($inventoryExitCode -ne 0 -or -not $hasGpu) {
                 Write-Warning 'GPU tools installed, but hashcat did not report a compatible GPU; CPU fallback remains available.'
@@ -238,6 +244,7 @@ try {
         }
     }
     Write-Host "GPU tools installed at $destinationFullPath"
+    $global:LASTEXITCODE = 0
 }
 finally {
     if ($temporaryArchive) {
