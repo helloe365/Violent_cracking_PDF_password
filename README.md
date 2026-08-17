@@ -31,13 +31,15 @@
 powershell -ExecutionPolicy Bypass -File .\Install.ps1
 ```
 
-该脚本会创建或复用 `.venv`，安装项目的 `dev` 和 `gpu` 依赖，下载固定 Release `gpu-tools-v7.1.2-r1` 中的 `pdf-password-recovery-gpu-tools-windows-x64-v7.1.2.zip`，校验 SHA256 后安装 GPU 工具，并运行 hashcat 设备预检。重复运行会复用现有虚拟环境和已验证的同一工具包。
+该脚本会创建或复用 `.venv`，安装项目的 `dev` 和 `gpu` 依赖，下载固定 Release `gpu-tools-v7.1.2-r1` 中的 `pdf-password-recovery-gpu-tools-windows-x64-v7.1.2.zip`，校验 SHA256 后安装 GPU 工具，并运行 hashcat 设备预检。重复运行会复用现有虚拟环境；匹配安装会跳过下载、解压和设备预检。需要刷新设备状态时，手工运行 `& .\downloads\gpu-tools\hashcat-7.1.2\hashcat.exe -I`。
 
 预检未发现兼容 GPU 时会发出警告，CPU 回退仍可用；这不表示 GPU 恢复已经验证成功。下载完整性或安装失败会以非零状态退出。若只需要 CPU，跳过 GPU 工具下载和预检：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\Install.ps1 -CpuOnly
 ```
+
+`-CpuOnly` 只跳过 GPU 工具安装与设备预检，不会强制之后的恢复任务使用 CPU。若要强制 CPU 运行，请在恢复命令中传入 `--backend cpu`。
 
 安装后查看帮助：
 

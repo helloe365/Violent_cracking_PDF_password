@@ -234,9 +234,22 @@ try {
                 }
             }
             $inventoryExitCode = $inventoryProcess.ExitCode
-            $hasGpu = (@($inventory) -join [Environment]::NewLine) -match '(?im)^\s*Type[^:]*:\s*GPU\b'
+            $inventoryText = @($inventory) -join [Environment]::NewLine
+            $hasGpu = $inventoryText -match '(?im)^\s*Type[^:]*:\s*GPU\b'
             if ($inventoryExitCode -ne 0 -or -not $hasGpu) {
                 Write-Warning 'GPU tools installed, but hashcat did not report a compatible GPU; CPU fallback remains available.'
+            }
+            else {
+                Write-Host 'GPU device preflight succeeded. Detected GPU devices:'
+                $reportedDevices = 0
+                foreach ($deviceMatch in [regex]::Matches($inventoryText, '(?ms)^\s*Backend Device ID #(?<id>\d+)\s*\r?\n(?<body>.*?)(?=^\s*Backend Device ID #|\z)')) {
+                    if ($deviceMatch.Groups['body'].Value -notmatch '(?im)^\s*Type[^:]*:\s*GPU\b') { continue }
+                    $nameMatch = [regex]::Match($deviceMatch.Groups['body'].Value, '(?im)^\s*Name[^:]*:\s*(?<name>[^\r\n]+)')
+                    $deviceName = if ($nameMatch.Success) { $nameMatch.Groups['name'].Value.Trim() } else { 'Unnamed GPU' }
+                    Write-Host "- Device #$($deviceMatch.Groups['id'].Value): $deviceName"
+                    $reportedDevices++
+                }
+                if ($reportedDevices -eq 0) { Write-Host '- GPU device reported by hashcat (name unavailable)' }
             }
         }
         catch {

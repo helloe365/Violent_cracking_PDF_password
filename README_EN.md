@@ -31,13 +31,15 @@ From the repository root, run:
 powershell -ExecutionPolicy Bypass -File .\Install.ps1
 ```
 
-The script creates or reuses `.venv`, installs the project's `dev` and `gpu` dependencies, downloads `pdf-password-recovery-gpu-tools-windows-x64-v7.1.2.zip` from the pinned `gpu-tools-v7.1.2-r1` Release, verifies its SHA256, installs the GPU tools, and runs hashcat device preflight. Rerunning it reuses the existing virtual environment and the same verified tool package.
+The script creates or reuses `.venv`, installs the project's `dev` and `gpu` dependencies, downloads `pdf-password-recovery-gpu-tools-windows-x64-v7.1.2.zip` from the pinned `gpu-tools-v7.1.2-r1` Release, verifies its SHA256, installs the GPU tools, and runs hashcat device preflight. Rerunning it reuses the existing virtual environment; a matching installation skips download, extraction, and device preflight. To refresh the device status, manually run `& .\downloads\gpu-tools\hashcat-7.1.2\hashcat.exe -I`.
 
 If preflight finds no compatible GPU, it warns and preserves CPU fallback; it does not prove that GPU recovery will succeed. An integrity or installation failure exits nonzero. For CPU-only use, skip the GPU tool download and preflight:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\Install.ps1 -CpuOnly
 ```
+
+`-CpuOnly` skips only GPU tool installation and device preflight; it does not force later recovery runs to use the CPU. To force CPU execution, pass `--backend cpu` to the recovery command.
 
 After installation, verify the command-line entry point:
 
