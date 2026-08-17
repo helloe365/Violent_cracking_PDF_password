@@ -8,7 +8,7 @@ param(
     [ValidateNotNullOrEmpty()]
     [string]$OutputDirectory,
 
-    [string]$Repository = 'helloe365/Violent_cracking_PDF_password',
+    [string]$Repository = 'helloe365/CrackPDFPassword',
 
     [ValidateSet('gpu-tools-v7.1.2-r1')]
     [string]$Tag = 'gpu-tools-v7.1.2-r1'
