@@ -31,7 +31,7 @@ From the repository root, run:
 powershell -ExecutionPolicy Bypass -File .\Install.ps1
 ```
 
-The script creates or reuses `.venv`, installs the project's `dev` and `gpu` dependencies, downloads `pdf-password-recovery-gpu-tools-windows-x64-v7.1.2.zip` from the pinned `gpu-tools-v7.1.2-r1` Release, verifies its SHA256, installs the GPU tools, and runs hashcat device preflight. Rerunning it reuses the existing virtual environment; a matching installation skips download, extraction, and device preflight. To refresh the device status, manually run `& .\downloads\gpu-tools\hashcat-7.1.2\hashcat.exe -I`.
+The script creates or reuses `.venv`, installs the project's `dev` and `gpu` dependencies, downloads `pdf-password-recovery-gpu-tools-windows-x64-v7.1.2.zip` from the pinned `gpu-tools-v7.1.2-r1` Release, verifies its SHA256, installs the GPU tools, and runs hashcat device preflight. Rerunning it reuses the existing virtual environment; a matching installation skips download, extraction, and device preflight. To refresh the device status, manually run `Push-Location .\downloads\gpu-tools\hashcat-7.1.2; try { & .\hashcat.exe -I } finally { Pop-Location }`.
 
 If preflight finds no compatible GPU, it warns and preserves CPU fallback; it does not prove that GPU recovery will succeed. An integrity or installation failure exits nonzero. For CPU-only use, skip the GPU tool download and preflight:
 
@@ -153,7 +153,7 @@ The one-command installer places the verified, pinned GPU tool package in `downl
 Use the following commands only to troubleshoot an installation or GPU run; they are not required for the one-command installation:
 
 ```powershell
-& .\downloads\gpu-tools\hashcat-7.1.2\hashcat.exe -I
+Push-Location .\downloads\gpu-tools\hashcat-7.1.2; try { & .\hashcat.exe -I } finally { Pop-Location }
 .\.venv\Scripts\python.exe .\downloads\gpu-tools\pdf2john.py .\protected.pdf
 .\.venv\Scripts\python.exe -c "from pdf_password_recovery.backends.hashcat import discover_toolchain; print(discover_toolchain())"
 ```
