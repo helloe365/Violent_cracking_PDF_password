@@ -20,23 +20,29 @@ A Windows-first command-line tool for recovering passwords from local PDF files 
 
 - Windows 10 or Windows 11
 - Python 3.11 or later
-- No external tools for CPU recovery
-- hashcat and John the Ripper Jumbo's `pdf2john` for GPU recovery
+- CPU recovery needs no external tools; the one-command installer configures the tools needed for GPU recovery.
+- You remain responsible for installing and updating GPU drivers; preflight only inspects devices visible to the current toolchain.
 
 ## Installation
 
+From the repository root, run:
+
 ```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -U pip
-python -m pip install -e ".[dev]"
+powershell -ExecutionPolicy Bypass -File .\Install.ps1
 ```
 
-Verify the command-line entry points:
+The script creates or reuses `.venv`, installs the project's `dev` and `gpu` dependencies, downloads `pdf-password-recovery-gpu-tools-windows-x64-v7.1.2.zip` from the pinned `gpu-tools-v7.1.2-r1` Release, verifies its SHA256, installs the GPU tools, and runs hashcat device preflight. Rerunning it reuses the existing virtual environment and the same verified tool package.
+
+If preflight finds no compatible GPU, it warns and preserves CPU fallback; it does not prove that GPU recovery will succeed. An integrity or installation failure exits nonzero. For CPU-only use, skip the GPU tool download and preflight:
 
 ```powershell
-pdf-password-recovery --help
-python -m pdf_password_recovery --help
+powershell -ExecutionPolicy Bypass -File .\Install.ps1 -CpuOnly
+```
+
+After installation, verify the command-line entry point:
+
+```powershell
+.\.venv\Scripts\python.exe -m pdf_password_recovery --help
 ```
 
 ## Quick Start
@@ -136,13 +142,13 @@ Smart-session identity includes the PDF, bundled dictionary, mutation-rule versi
 
 ## GPU and hashcat Setup
 
-The tool discovers hashcat and `pdf2john` in this order:
+The one-command installer places the verified, pinned GPU tool package in `downloads/gpu-tools/`. The tool discovers hashcat and `pdf2john` in this order:
 
 1. `PDF_PASSWORD_RECOVERY_HASHCAT` and `PDF_PASSWORD_RECOVERY_PDF2JOHN` environment variables.
 2. The current `PATH`.
 3. `downloads/gpu-tools/` in a development checkout.
 
-Check the external tools before starting a GPU run:
+Use the following commands only to troubleshoot an installation or GPU run; they are not required for the one-command installation:
 
 ```powershell
 hashcat -I
@@ -150,6 +156,12 @@ Get-Command hashcat,pdf2john,pdf2john.py,pdf2john.pl
 ```
 
 The hashcat backend selects GPU-class devices only. When both a discrete GPU and a unified-memory integrated GPU are detected, it prefers the discrete device. With `--backend auto`, fallback to CPU happens only before candidate processing starts. With `--backend hashcat`, missing tools, unsupported PDF modes, or incompatible GPU configuration are reported as errors instead of silently falling back.
+
+For the first real GPU task, explicitly use `--backend hashcat` so toolchain or compatibility errors are visible:
+
+```powershell
+pdf-password-recovery protected.pdf --attack dictionary --wordlist words.txt --backend hashcat
+```
 
 ## Interrupt and Resume
 

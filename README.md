@@ -20,23 +20,29 @@
 
 - Windows 10/11
 - Python 3.11+
-- CPU 模式无需外部程序
-- GPU 模式需要 hashcat 与 John the Ripper Jumbo 的 pdf2john
+- CPU 模式无需外部程序；一键安装会为 GPU 模式配置所需工具。
+- GPU 驱动仍由你负责安装和更新；预检只检查当前工具链可见的设备。
 
 ## 安装
 
+在仓库根目录执行：
+
 ```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -U pip
-python -m pip install -e ".[dev]"
+powershell -ExecutionPolicy Bypass -File .\Install.ps1
 ```
 
-查看帮助：
+该脚本会创建或复用 `.venv`，安装项目的 `dev` 和 `gpu` 依赖，下载固定 Release `gpu-tools-v7.1.2-r1` 中的 `pdf-password-recovery-gpu-tools-windows-x64-v7.1.2.zip`，校验 SHA256 后安装 GPU 工具，并运行 hashcat 设备预检。重复运行会复用现有虚拟环境和已验证的同一工具包。
+
+预检未发现兼容 GPU 时会发出警告，CPU 回退仍可用；这不表示 GPU 恢复已经验证成功。下载完整性或安装失败会以非零状态退出。若只需要 CPU，跳过 GPU 工具下载和预检：
 
 ```powershell
-pdf-password-recovery --help
-python -m pdf_password_recovery --help
+powershell -ExecutionPolicy Bypass -File .\Install.ps1 -CpuOnly
+```
+
+安装后查看帮助：
+
+```powershell
+.\.venv\Scripts\python.exe -m pdf_password_recovery --help
 ```
 
 # 快速开始
@@ -136,13 +142,13 @@ if result.password is not None:
 
 ## GPU/hashcat 配置
 
-工具按以下顺序寻找 hashcat 与 pdf2john：
+一键安装会将已校验的固定 GPU 工具包安装到 `downloads/gpu-tools/`。工具仍按以下顺序寻找 hashcat 与 pdf2john：
 
 1. 环境变量 `PDF_PASSWORD_RECOVERY_HASHCAT`、`PDF_PASSWORD_RECOVERY_PDF2JOHN`。
 2. 当前 `PATH`。
 3. 开发仓库的 `downloads/gpu-tools/`。
 
-安装后先检查：
+以下命令仅用于安装或 GPU 运行异常时的故障排查，并非一键安装的必需步骤：
 
 ```powershell
 hashcat -I
@@ -150,6 +156,12 @@ Get-Command hashcat,pdf2john,pdf2john.py,pdf2john.pl
 ```
 
 hashcat 固定使用 GPU 类型设备。若同时检测到独显和共享内存核显，会优先选择非共享显存设备。`--backend auto` 只会在候选开始前回退 CPU；显式指定 `--backend hashcat` 时，GPU 工具或兼容模式不可用会直接报错。
+
+首次执行真实 GPU 任务时，建议显式指定 `--backend hashcat`，让工具或兼容性问题直接显示：
+
+```powershell
+pdf-password-recovery protected.pdf --attack dictionary --wordlist words.txt --backend hashcat
+```
 
 ## 中断与恢复
 
