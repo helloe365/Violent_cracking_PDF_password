@@ -10,24 +10,31 @@ $repositoryRoot = $PSScriptRoot
 $venvPath = Join-Path $repositoryRoot '.venv'
 $venvPython = Join-Path $venvPath 'Scripts\python.exe'
 
+$candidates = @()
 $py = Get-Command -Name py -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
-if ($py) {
-    $python = $py.Path
-    $pythonArguments = @('-3.11')
-}
-else {
-    $fallback = Get-Command -Name python -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
-    if (-not $fallback) { throw 'Python 3.11 or newer is required. Install Python and try again.' }
-    $python = $fallback.Path
-    $pythonArguments = @()
-}
+if ($py) { $candidates += [pscustomobject]@{ Path = $py.Path; Arguments = @('-3.11') } }
+$fallback = Get-Command -Name python -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($fallback) { $candidates += [pscustomobject]@{ Path = $fallback.Path; Arguments = @() } }
 
-$versionText = (& $python @pythonArguments -c "import sys; print('.'.join(map(str, sys.version_info[:3])))").Trim()
-if ($LASTEXITCODE -ne 0) { throw 'Python 3.11 or newer is required. Python version check failed.' }
-try { $pythonVersion = [version]$versionText }
-catch { throw "Python 3.11 or newer is required. Detected: $versionText" }
-if ($pythonVersion -lt [version]'3.11') {
-    throw "Python 3.11 or newer is required. Detected: $versionText"
+$python = $null
+$pythonArguments = @()
+foreach ($candidate in $candidates) {
+    try {
+        $versionOutput = & $candidate.Path @($candidate.Arguments) -c "import sys; print('.'.join(map(str, sys.version_info[:3])))" 2>$null
+        $exitCode = $LASTEXITCODE
+    }
+    catch { continue }
+    if ($exitCode -ne 0) { continue }
+    try { $pythonVersion = [version]([string]($versionOutput -join [Environment]::NewLine)).Trim() }
+    catch { continue }
+    if ($pythonVersion -ge [version]'3.11') {
+        $python = $candidate.Path
+        $pythonArguments = @($candidate.Arguments)
+        break
+    }
+}
+if ($null -eq $python) {
+    throw 'No usable Python 3.11+ interpreter was found. Tried py -3.11 and python; install Python 3.11 or newer and try again.'
 }
 
 Push-Location -LiteralPath $repositoryRoot
