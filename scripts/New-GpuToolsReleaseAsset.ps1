@@ -10,6 +10,7 @@ param(
 
     [string]$Repository = 'helloe365/Violent_cracking_PDF_password',
 
+    [ValidateSet('gpu-tools-v7.1.2-r1')]
     [string]$Tag = 'gpu-tools-v7.1.2-r1'
 )
 
@@ -24,12 +25,33 @@ if (-not (Test-Path -LiteralPath $resolvedToolRoot -PathType Container)) {
 
 $hashcatDirectory = Join-Path $resolvedToolRoot 'hashcat-7.1.2'
 $hashcatExecutable = Join-Path $hashcatDirectory 'hashcat.exe'
+$hashcatData = Join-Path $hashcatDirectory 'hashcat.bin'
 $hashcatLicense = Join-Path $hashcatDirectory 'docs\license.txt'
+$hashcatModules = Join-Path $hashcatDirectory 'modules'
+$hashcatOpenCl = Join-Path $hashcatDirectory 'OpenCL'
 $pdf2john = Join-Path $resolvedToolRoot 'pdf2john.py'
-foreach ($requiredFile in @($hashcatExecutable, $hashcatLicense, $pdf2john)) {
+foreach ($requiredFile in @($hashcatExecutable, $hashcatData, $hashcatLicense, $pdf2john)) {
     if (-not (Test-Path -LiteralPath $requiredFile -PathType Leaf)) {
         throw "Required GPU tool file is missing: $requiredFile"
     }
+}
+foreach ($requiredDirectory in @($hashcatDirectory, $hashcatModules, $hashcatOpenCl)) {
+    if (-not (Test-Path -LiteralPath $requiredDirectory -PathType Container)) {
+        throw "Required hashcat runtime directory is missing: $requiredDirectory"
+    }
+}
+
+$generatedState = Get-ChildItem -LiteralPath $hashcatDirectory -Recurse -Force | Where-Object {
+    (-not $_.PSIsContainer -and $_.Name -match '(?i)\.(log|pid|restore|outfile|potfile)$') -or
+    ($_.PSIsContainer -and $_.Name -match '(?i)\.outfiles$')
+}
+if ($generatedState) {
+    throw "Hashcat runtime contains generated state or test output: $($generatedState.FullName -join ', ')"
+}
+
+$hashcatVersion = (& $hashcatExecutable --version | Select-Object -First 1).Trim()
+if ($LASTEXITCODE -ne 0 -or $hashcatVersion -ne 'v7.1.2') {
+    throw "hashcat.exe must report v7.1.2; received: $hashcatVersion"
 }
 
 if (-not (Test-Path -LiteralPath $OutputDirectory)) {
