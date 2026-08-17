@@ -50,7 +50,7 @@ powershell -ExecutionPolicy Bypass -File .\Install.ps1 -CpuOnly
 # 零参数向导 -- 直接使用这个就可以
 
 ```powershell
-pdf-password-recovery
+.\.venv\Scripts\python.exe -m pdf_password_recovery
 ```
 
 零参数入口会进入中文智能向导，依次询问 PDF 路径、最小长度、最大长度和 CPU 回退进程数。确认后按“常用字典 → 规则变形 → 动态掩码 → 有限穷举”执行，默认长度为 `4–6`。后端为 `auto`：优先使用 GPU/hashcat，不可用时回退 CPU。
@@ -60,7 +60,7 @@ pdf-password-recovery
 ### 字典攻击
 
 ```powershell
-pdf-password-recovery protected.pdf `
+.\.venv\Scripts\python.exe -m pdf_password_recovery protected.pdf `
   --attack dictionary `
   --wordlist words.txt `
   --backend auto
@@ -69,7 +69,7 @@ pdf-password-recovery protected.pdf `
 ### 掩码攻击
 
 ```powershell
-pdf-password-recovery protected.pdf `
+.\.venv\Scripts\python.exe -m pdf_password_recovery protected.pdf `
   --attack mask `
   --mask "?u?l?l?l?d?d" `
   --backend auto
@@ -88,7 +88,7 @@ pdf-password-recovery protected.pdf `
 ### 有限穷举
 
 ```powershell
-pdf-password-recovery protected.pdf `
+.\.venv\Scripts\python.exe -m pdf_password_recovery protected.pdf `
   --attack brute `
   --charset alnum `
   --min-length 4 `
@@ -102,7 +102,7 @@ pdf-password-recovery protected.pdf `
 非交互运行必须明确指定攻击方式并添加 `--yes`：
 
 ```powershell
-pdf-password-recovery protected.pdf --attack brute --charset digits `
+.\.venv\Scripts\python.exe -m pdf_password_recovery protected.pdf --attack brute --charset digits `
   --min-length 1 --max-length 8 --backend cpu --yes
 ```
 
@@ -142,7 +142,7 @@ if result.password is not None:
 
 ## GPU/hashcat 配置
 
-一键安装会将已校验的固定 GPU 工具包安装到 `downloads/gpu-tools/`。工具仍按以下顺序寻找 hashcat 与 pdf2john：
+一键安装会将已校验的固定 GPU 工具包安装到 `downloads/gpu-tools/`，但不会修改调用者 PowerShell 的 `PATH`。工具仍按以下顺序寻找 hashcat 与 pdf2john；这是已有手工配置的发现顺序说明，不是安装后必须执行的配置：
 
 1. 环境变量 `PDF_PASSWORD_RECOVERY_HASHCAT`、`PDF_PASSWORD_RECOVERY_PDF2JOHN`。
 2. 当前 `PATH`。
@@ -151,8 +151,9 @@ if result.password is not None:
 以下命令仅用于安装或 GPU 运行异常时的故障排查，并非一键安装的必需步骤：
 
 ```powershell
-hashcat -I
-Get-Command hashcat,pdf2john,pdf2john.py,pdf2john.pl
+& .\downloads\gpu-tools\hashcat-7.1.2\hashcat.exe -I
+.\.venv\Scripts\python.exe .\downloads\gpu-tools\pdf2john.py .\protected.pdf
+.\.venv\Scripts\python.exe -c "from pdf_password_recovery.backends.hashcat import discover_toolchain; print(discover_toolchain())"
 ```
 
 hashcat 固定使用 GPU 类型设备。若同时检测到独显和共享内存核显，会优先选择非共享显存设备。`--backend auto` 只会在候选开始前回退 CPU；显式指定 `--backend hashcat` 时，GPU 工具或兼容模式不可用会直接报错。
@@ -160,7 +161,7 @@ hashcat 固定使用 GPU 类型设备。若同时检测到独显和共享内存�
 首次执行真实 GPU 任务时，建议显式指定 `--backend hashcat`，让工具或兼容性问题直接显示：
 
 ```powershell
-pdf-password-recovery protected.pdf --attack dictionary --wordlist words.txt --backend hashcat
+.\.venv\Scripts\python.exe -m pdf_password_recovery protected.pdf --attack dictionary --wordlist words.txt --backend hashcat
 ```
 
 ## 中断与恢复
@@ -168,14 +169,14 @@ pdf-password-recovery protected.pdf --attack dictionary --wordlist words.txt --b
 高级 CLI 使用安全的会话名保存状态：
 
 ```powershell
-pdf-password-recovery protected.pdf --attack brute --charset digits `
+.\.venv\Scripts\python.exe -m pdf_password_recovery protected.pdf --attack brute --charset digits `
   --min-length 1 --max-length 8 --backend cpu --session numeric
 ```
 
 按 `Ctrl+C` 后，使用完全相同的 PDF、攻击参数和会话名恢复：
 
 ```powershell
-pdf-password-recovery protected.pdf --attack brute --charset digits `
+.\.venv\Scripts\python.exe -m pdf_password_recovery protected.pdf --attack brute --charset digits `
   --min-length 1 --max-length 8 --backend cpu --session numeric --resume
 ```
 

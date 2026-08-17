@@ -50,7 +50,7 @@ After installation, verify the command-line entry point:
 ### Guided smart recovery
 
 ```powershell
-pdf-password-recovery
+.\.venv\Scripts\python.exe -m pdf_password_recovery
 ```
 
 Running the command without arguments opens a Chinese-language guided workflow. It asks for the PDF path, minimum and maximum password lengths, and the number of CPU fallback workers. The default length range is `4–6`.
@@ -60,7 +60,7 @@ The workflow uses the `auto` backend: it prefers GPU/hashcat and falls back to C
 ### Dictionary attack
 
 ```powershell
-pdf-password-recovery protected.pdf `
+.\.venv\Scripts\python.exe -m pdf_password_recovery protected.pdf `
   --attack dictionary `
   --wordlist words.txt `
   --backend auto
@@ -69,7 +69,7 @@ pdf-password-recovery protected.pdf `
 ### Mask attack
 
 ```powershell
-pdf-password-recovery protected.pdf `
+.\.venv\Scripts\python.exe -m pdf_password_recovery protected.pdf `
   --attack mask `
   --mask "?u?l?l?l?d?d" `
   --backend auto
@@ -88,7 +88,7 @@ Supported mask tokens:
 ### Length-bounded brute force
 
 ```powershell
-pdf-password-recovery protected.pdf `
+.\.venv\Scripts\python.exe -m pdf_password_recovery protected.pdf `
   --attack brute `
   --charset alnum `
   --min-length 4 `
@@ -102,7 +102,7 @@ Built-in character-set presets are `digits`, `lower`, `upper`, `letters`, and `a
 Non-interactive runs must specify an attack mode and include `--yes`:
 
 ```powershell
-pdf-password-recovery protected.pdf --attack brute --charset digits `
+.\.venv\Scripts\python.exe -m pdf_password_recovery protected.pdf --attack brute --charset digits `
   --min-length 1 --max-length 8 --backend cpu --yes
 ```
 
@@ -142,7 +142,7 @@ Smart-session identity includes the PDF, bundled dictionary, mutation-rule versi
 
 ## GPU and hashcat Setup
 
-The one-command installer places the verified, pinned GPU tool package in `downloads/gpu-tools/`. The tool discovers hashcat and `pdf2john` in this order:
+The one-command installer places the verified, pinned GPU tool package in `downloads/gpu-tools/`, but does not change the calling PowerShell session's `PATH`. The tool discovers hashcat and `pdf2john` in this order; this explains existing manual configuration, not a required post-installation setup step:
 
 1. `PDF_PASSWORD_RECOVERY_HASHCAT` and `PDF_PASSWORD_RECOVERY_PDF2JOHN` environment variables.
 2. The current `PATH`.
@@ -151,8 +151,9 @@ The one-command installer places the verified, pinned GPU tool package in `downl
 Use the following commands only to troubleshoot an installation or GPU run; they are not required for the one-command installation:
 
 ```powershell
-hashcat -I
-Get-Command hashcat,pdf2john,pdf2john.py,pdf2john.pl
+& .\downloads\gpu-tools\hashcat-7.1.2\hashcat.exe -I
+.\.venv\Scripts\python.exe .\downloads\gpu-tools\pdf2john.py .\protected.pdf
+.\.venv\Scripts\python.exe -c "from pdf_password_recovery.backends.hashcat import discover_toolchain; print(discover_toolchain())"
 ```
 
 The hashcat backend selects GPU-class devices only. When both a discrete GPU and a unified-memory integrated GPU are detected, it prefers the discrete device. With `--backend auto`, fallback to CPU happens only before candidate processing starts. With `--backend hashcat`, missing tools, unsupported PDF modes, or incompatible GPU configuration are reported as errors instead of silently falling back.
@@ -160,7 +161,7 @@ The hashcat backend selects GPU-class devices only. When both a discrete GPU and
 For the first real GPU task, explicitly use `--backend hashcat` so toolchain or compatibility errors are visible:
 
 ```powershell
-pdf-password-recovery protected.pdf --attack dictionary --wordlist words.txt --backend hashcat
+.\.venv\Scripts\python.exe -m pdf_password_recovery protected.pdf --attack dictionary --wordlist words.txt --backend hashcat
 ```
 
 ## Interrupt and Resume
@@ -168,14 +169,14 @@ pdf-password-recovery protected.pdf --attack dictionary --wordlist words.txt --b
 Advanced CLI runs can use an explicit session name:
 
 ```powershell
-pdf-password-recovery protected.pdf --attack brute --charset digits `
+.\.venv\Scripts\python.exe -m pdf_password_recovery protected.pdf --attack brute --charset digits `
   --min-length 1 --max-length 8 --backend cpu --session numeric
 ```
 
 After stopping with `Ctrl+C`, resume with the same PDF, attack configuration, and session name:
 
 ```powershell
-pdf-password-recovery protected.pdf --attack brute --charset digits `
+.\.venv\Scripts\python.exe -m pdf_password_recovery protected.pdf --attack brute --charset digits `
   --min-length 1 --max-length 8 --backend cpu --session numeric --resume
 ```
 
