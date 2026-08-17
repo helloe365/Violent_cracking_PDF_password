@@ -42,15 +42,17 @@ foreach ($requiredDirectory in @($hashcatDirectory, $hashcatModules, $hashcatOpe
 }
 
 $generatedState = Get-ChildItem -LiteralPath $hashcatDirectory -Recurse -Force | Where-Object {
-    (-not $_.PSIsContainer -and $_.Name -match '(?i)\.(log|pid|restore|outfile|potfile)$') -or
+    (-not $_.PSIsContainer -and ($_.Name -match '(?i)\.(log|pid|restore|outfile|potfile)$' -or $_.Name -ieq 'hashcat.dictstat2')) -or
     ($_.PSIsContainer -and $_.Name -match '(?i)\.outfiles$')
 }
 if ($generatedState) {
     throw "Hashcat runtime contains generated state or test output: $($generatedState.FullName -join ', ')"
 }
 
-$hashcatVersion = (& $hashcatExecutable --version | Select-Object -First 1).Trim()
-if ($LASTEXITCODE -ne 0 -or $hashcatVersion -ne 'v7.1.2') {
+$hashcatVersionOutput = & $hashcatExecutable --version
+$hashcatExitCode = $LASTEXITCODE
+$hashcatVersion = ($hashcatVersionOutput | Select-Object -First 1).Trim()
+if ($hashcatExitCode -ne 0 -or $hashcatVersion -ne 'v7.1.2') {
     throw "hashcat.exe must report v7.1.2; received: $hashcatVersion"
 }
 
