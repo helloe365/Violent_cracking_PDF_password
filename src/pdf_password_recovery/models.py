@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+import math
+import re
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import TypeAlias
@@ -18,6 +22,15 @@ class BackendChoice(StrEnum):
     AUTO = "auto"
     HASHCAT = "hashcat"
     CPU = "cpu"
+
+
+class SessionStatus(StrEnum):
+    PLANNED = "planned"
+    RUNNING = "running"
+    INTERRUPTED = "interrupted"
+    FOUND = "found"
+    EXHAUSTED = "exhausted"
+    FAILED = "failed"
 
 
 class OutcomeStatus(StrEnum):
@@ -135,3 +148,115 @@ class RecoveryOutcome:
     attempted: int
     elapsed: float
     backend: str
+
+
+_SESSION_NAME = re.compile(r"^[A-Za-z0-9._-]+$")
+_SUMMARY_SENSITIVE_KEYS = frozenset({"password", "pdf_hash", "extracted_hash", "hints"})
+
+
+def _utc_timestamp() -> str:
+    return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+@dataclass(frozen=True, slots=True)
+class SessionSummary:
+    name: str
+    schema: int = 1
+    status: SessionStatus = SessionStatus.PLANNED
+    pdf_display_name: str = ""
+    pdf_fingerprint: Mapping[str, object] = field(default_factory=dict)
+    plan_fingerprint: str = ""
+    stage_id: str | None = None
+    stage_index: int = 0
+    stage_count: int = 0
+    backend: str = ""
+    device_ids: tuple[str, ...] = ()
+    tool_version: str | None = None
+    workload: str | None = None
+    completed: int = 0
+    total: int = 0
+    elapsed_seconds: float = 0.0
+    created_at: str = field(default_factory=_utc_timestamp)
+    updated_at: str = field(default_factory=_utc_timestamp)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.name, str) or not _SESSION_NAME.fullmatch(self.name):
+            raise ConfigurationError(
+                "session name may contain only letters, digits, '.', '_' and '-'"
+            )
+        if self.name in {".", ".."}:
+            raise ConfigurationError("session name may not be '.' or '..'")
+        if isinstance(self.schema, bool) or self.schema != 1:
+            raise ConfigurationError("session schema must be 1")
+        if not isinstance(self.status, SessionStatus):
+            raise ConfigurationError("session status must be a SessionStatus")
+        if not isinstance(self.pdf_display_name, str):
+            raise ConfigurationError("PDF display name must be a string")
+        if not isinstance(self.pdf_fingerprint, Mapping):
+            raise ConfigurationError("PDF fingerprint must be a mapping")
+        if not isinstance(self.plan_fingerprint, str):
+            raise ConfigurationError("plan fingerprint must be a string")
+        if self.stage_id is not None and not isinstance(self.stage_id, str):
+            raise ConfigurationError("stage ID must be a string or null")
+        for field_name in ("stage_index", "stage_count", "completed", "total"):
+            _require_non_negative_int(field_name, getattr(self, field_name))
+        if isinstance(self.elapsed_seconds, bool) or not isinstance(
+            self.elapsed_seconds, (int, float)
+        ):
+            raise ConfigurationError("elapsed seconds must be a number")
+        if not math.isfinite(self.elapsed_seconds) or self.elapsed_seconds < 0:
+            raise ConfigurationError("elapsed seconds cannot be negative")
+        if not isinstance(self.device_ids, tuple) or not all(
+            isinstance(device_id, str) for device_id in self.device_ids
+        ):
+            raise ConfigurationError("device IDs must be a tuple of strings")
+        if self.tool_version is not None and not isinstance(self.tool_version, str):
+            raise ConfigurationError("tool version must be a string or null")
+        if self.workload is not None and not isinstance(self.workload, str):
+            raise ConfigurationError("workload must be a string or null")
+        for value in (
+            self.pdf_display_name,
+            self.pdf_fingerprint,
+            self.plan_fingerprint,
+            self.stage_id,
+            self.backend,
+            self.device_ids,
+            self.tool_version,
+            self.workload,
+        ):
+            _reject_summary_sensitive_data(value)
+        _validate_utc_timestamp(self.created_at, "created timestamp")
+        _validate_utc_timestamp(self.updated_at, "updated timestamp")
+
+
+def _require_non_negative_int(field_name: str, value: object) -> None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ConfigurationError(f"{field_name} must be an integer")
+    if value < 0:
+        raise ConfigurationError(f"{field_name} cannot be negative")
+
+
+def _validate_utc_timestamp(value: object, field_name: str) -> None:
+    if not isinstance(value, str) or not value.endswith("Z"):
+        raise ConfigurationError(f"{field_name} must be UTC ISO-8601 ending in Z")
+    try:
+        parsed = datetime.fromisoformat(value.removesuffix("Z") + "+00:00")
+    except ValueError as exc:
+        raise ConfigurationError(f"{field_name} must be UTC ISO-8601 ending in Z") from exc
+    if parsed.tzinfo != UTC or parsed.utcoffset() != UTC.utcoffset(None):
+        raise ConfigurationError(f"{field_name} must be UTC ISO-8601 ending in Z")
+
+
+def _reject_summary_sensitive_data(value: object) -> None:
+    if isinstance(value, str):
+        if "$pdf$" in value:
+            raise ConfigurationError("session summary may not contain an extracted PDF hash")
+    elif isinstance(value, Mapping):
+        for key, nested in value.items():
+            normalized = key.casefold() if isinstance(key, str) else ""
+            if normalized in _SUMMARY_SENSITIVE_KEYS or "hint" in normalized:
+                raise ConfigurationError(f"session summary may not contain '{key}'")
+            _reject_summary_sensitive_data(nested)
+    elif isinstance(value, (list, tuple)):
+        for nested in value:
+            _reject_summary_sensitive_data(nested)
