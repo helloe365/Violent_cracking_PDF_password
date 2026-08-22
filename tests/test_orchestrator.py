@@ -24,7 +24,7 @@ from pdf_password_recovery.models import (
     RecoveryOutcome,
     WorkloadProfile,
 )
-from pdf_password_recovery.orchestrator import run_plan
+from pdf_password_recovery.orchestrator import _event_stage_id, _summary, run_plan
 from pdf_password_recovery.sessions import SessionStore
 
 
@@ -98,6 +98,20 @@ def test_run_plan_exhausted_emits_terminal_result(tmp_path: Path) -> None:
     outcome = run_plan(plan, pdf_path=pdf, backend="cpu", recover_fn=recover, event_sink=sink)
     assert outcome.status is OutcomeStatus.EXHAUSTED
     assert sink.events[-1]["payload"]["status"] == "exhausted"
+
+
+def test_unicode_stage_and_pdf_names_are_slugged_before_events_and_sessions(tmp_path: Path) -> None:
+    plan, _ = _plan(tmp_path)
+    pdf = tmp_path / "密码 记录.pdf"
+    pdf.write_bytes(b"%PDF-1.7")
+    stage_id = _event_stage_id("阶段 名")
+    summary = _summary(
+        "safe-session", pdf, plan, WorkloadProfile.BALANCED, BackendChoice.CPU
+    )
+
+    assert stage_id.isascii() and stage_id[0].isalnum()
+    assert summary.pdf_display_name.isascii()
+    assert summary.pdf_display_name != pdf.name
 
 
 def test_auto_resolves_one_backend_before_recover_and_does_not_retry(tmp_path: Path) -> None:

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import hashlib
 import os
+import re
 import time
+import unicodedata
 from collections.abc import Callable
 from contextlib import nullcontext
 from dataclasses import replace
@@ -45,9 +48,20 @@ def _emit(
 
 
 def _event_stage_id(value: str) -> str:
-    return (
-        "".join(char if char.isalnum() or char in "._-" else "-" for char in value)[:64] or "stage"
-    )
+    return _safe_ascii_slug(value, "stage", 64)
+
+
+def _safe_ascii_slug(value: str, fallback: str, limit: int) -> str:
+    normalized = unicodedata.normalize("NFKD", value)
+    ascii_value = normalized.encode("ascii", "ignore").decode("ascii")
+    slug = re.sub(r"[^A-Za-z0-9._-]+", "-", ascii_value).strip("._-")
+    if not slug:
+        slug = fallback
+    if slug != value or ascii_value != value:
+        suffix = hashlib.sha256(value.encode("utf-8")).hexdigest()[:8]
+        prefix = slug[: max(1, limit - len(suffix) - 1)].rstrip("._-")
+        slug = f"{prefix or fallback}-{suffix}"
+    return slug[:limit]
 
 
 def _event_backend(value: str, fallback: str = "auto") -> str:
@@ -56,8 +70,7 @@ def _event_backend(value: str, fallback: str = "auto") -> str:
 
 def _artifact_name(value: Path) -> str:
     name = value.name or "password.txt"
-    safe = "".join(char if char.isalnum() or char in "._-" else "-" for char in name)
-    return safe or "password.txt"
+    return _safe_ascii_slug(name, "password.txt", 64)
 
 
 def _preflight_payload(report: PreflightReport) -> dict[str, object]:
@@ -104,7 +117,7 @@ def _summary(
     return SessionSummary(
         name=name,
         status=status,
-        pdf_display_name=pdf_path.name,
+        pdf_display_name=_safe_ascii_slug(pdf_path.name, "document.pdf", 128),
         pdf_fingerprint={"size": fingerprint.size, "sha256": fingerprint.sha256},
         plan_fingerprint=plan.fingerprint,
         stage_id=_event_stage_id(stage.id) if stage else None,

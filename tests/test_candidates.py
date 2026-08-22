@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from pdf_password_recovery.backends.hashcat import SessionPaths, Toolchain, build_hashcat_args
+from pdf_password_recovery.backends.cpu import _candidate_space, _dictionary_variants
 from pdf_password_recovery.candidates import (
     BruteSpace,
     HybridSpace,
@@ -12,13 +13,28 @@ from pdf_password_recovery.candidates import (
     compile_mask,
 )
 from pdf_password_recovery.errors import MaskSyntaxError
-from pdf_password_recovery.models import BackendChoice, MaskAttack, RecoveryConfig
+from pdf_password_recovery.models import BackendChoice, HybridAttack, MaskAttack, RecoveryConfig, RulesAttack
 from pdf_password_recovery.plans import parse_hcmask
 
 
 def test_mask_compilation_supports_caller_custom_charsets_without_changing_legacy_tokens() -> None:
     assert compile_mask("?1?2?d??", ("ab", "XY")) == ("ab", "XY", "0123456789", "?")
     assert MaskSpace.compile("?d??").candidate_at(9) == "9?"
+
+
+def test_cpu_candidate_paths_cover_supported_rules_and_hybrid(tmp_path: Path) -> None:
+    wordlist = tmp_path / "words.txt"
+    wordlist.write_text("ab\n", encoding="utf-8")
+
+    assert list(_dictionary_variants(RulesAttack(wordlist, ("c",)), "ab")) == ["Ab"]
+    space = _candidate_space(HybridAttack(wordlist, "?d", "append"))
+    assert space.total == 10
+    assert space.candidate_at(9) == "ab9"
+
+
+def test_mask_custom_charset_limit_is_four() -> None:
+    with pytest.raises(MaskSyntaxError, match="four"):
+        compile_mask("?1", ("a", "b", "c", "d", "e"))
 
 
 def test_parse_hcmask_skips_comments_and_keeps_escaped_leading_hash_and_charsets(
@@ -41,6 +57,14 @@ def test_parse_hcmask_reports_invalid_physical_lines(tmp_path: Path, content: st
     mask_file.write_text(content, encoding="utf-8")
 
     with pytest.raises(MaskSyntaxError, match=r"invalid\.hcmask:1"):
+        parse_hcmask(mask_file)
+
+
+def test_parse_hcmask_reports_the_four_charset_limit(tmp_path: Path) -> None:
+    mask_file = tmp_path / "too-many.hcmask"
+    mask_file.write_text("a,b,c,d,e,?1\n", encoding="utf-8")
+
+    with pytest.raises(MaskSyntaxError, match="at most four"):
         parse_hcmask(mask_file)
 
 

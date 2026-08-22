@@ -51,7 +51,9 @@ def parse_hcmask(path: Path) -> tuple[HcmaskEntry, ...]:
         fields = line.split(",")
         mask = fields[-1]
         custom = tuple(fields[:-1])
-        if not mask or len(custom) > 8 or any(not value for value in custom):
+        if len(custom) > 4:
+            _mask_error(path, line_number, "mask supports at most four custom charsets")
+        if not mask or any(not value for value in custom):
             _mask_error(path, line_number, "invalid custom charset or missing mask")
         try:
             compile_mask(mask, custom)
@@ -349,10 +351,14 @@ def built_in_plan(
     dictionary = DictionaryStage(
         "wordlist", bundled_wordlist(), min_length=min_length, max_length=max_length
     )
-    numeric = (
-        MaskStage("pin4", mask="?d?d?d?d"),
-        MaskStage("pin6", mask="?d?d?d?d?d?d"),
-        MaskStage("pin8", mask="?d?d?d?d?d?d?d?d"),
+    numeric = tuple(
+        stage
+        for length, stage in (
+            (4, MaskStage("pin4", mask="?d?d?d?d")),
+            (6, MaskStage("pin6", mask="?d?d?d?d?d?d")),
+            (8, MaskStage("pin8", mask="?d?d?d?d?d?d?d?d")),
+        )
+        if min_length <= length <= max_length
     )
     stages: list[Any] = [dictionary, *numeric]
     if profile in {"balanced", "thorough"}:
@@ -379,9 +385,13 @@ def built_in_plan(
                 ]
             )
     if profile == "thorough":
-        stages.extend(
-            (MaskStage("lower-mask", mask="?l?l?l?l"), MaskStage("upper-mask", mask="?u?u?u?u"))
-        )
+        if min_length <= 4 <= max_length:
+            stages.extend(
+                (
+                    MaskStage("lower-mask", mask="?l?l?l?l"),
+                    MaskStage("upper-mask", mask="?u?u?u?u"),
+                )
+            )
         stages.append(BruteStage("bounded-brute", "alnum", min_length, max_length))
     return AttackPlan(1, f"pdf-recovery-{profile}", tuple(stages))
 

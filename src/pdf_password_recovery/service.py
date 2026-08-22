@@ -11,7 +11,7 @@ from pathlib import Path
 
 from .backends.cpu import ProgressCallback, run_cpu
 from .backends.hashcat import HashcatStatus, SessionPaths, run_hashcat
-from .candidates import BruteSpace, MaskSpace
+from .candidates import SMART_RULES, BruteSpace, MaskSpace
 from .checkpoint import (
     build_checkpoint,
     checkpoint_path,
@@ -82,6 +82,12 @@ def _preflight(config: RecoveryConfig) -> None:
     elif isinstance(attack, (RulesAttack, HybridAttack)):
         if not attack.wordlist.is_file():
             raise ConfigurationError(f"wordlist does not exist: {attack.wordlist}")
+        if (
+            isinstance(attack, RulesAttack)
+            and config.backend is BackendChoice.CPU
+            and any(rule not in SMART_RULES for rule in attack.rules)
+        ):
+            raise ConfigurationError("CPU backend supports only the built-in smart rules")
         if isinstance(attack, HybridAttack):
             MaskSpace.compile(attack.mask)
     elif hasattr(attack, "mask"):
@@ -106,8 +112,10 @@ def _cpu_checkpoint_path(config: RecoveryConfig) -> Path:
 def _run_cpu_with_checkpoint(
     config: RecoveryConfig, progress: ProgressCallback | None
 ) -> RecoveryOutcome:
-    if isinstance(config.attack, (RulesAttack, HybridAttack)):
-        raise ConfigurationError("CPU backend does not support rules or hybrid attacks")
+    if isinstance(config.attack, RulesAttack) and any(
+        rule not in SMART_RULES for rule in config.attack.rules
+    ):
+        raise ConfigurationError("CPU backend supports only the built-in smart rules")
     state_path = _cpu_checkpoint_path(config) if config.session else None
     cursor = None
     if config.resume:
@@ -167,7 +175,9 @@ def _hashcat_outcome(
 def _hashcat_manifest_payload(config: RecoveryConfig) -> dict[str, object]:
     attack = config.attack
     wordlist_fingerprint = (
-        file_fingerprint(attack.wordlist) if isinstance(attack, DictionaryAttack) else None
+        file_fingerprint(attack.wordlist)
+        if isinstance(attack, (DictionaryAttack, RulesAttack, HybridAttack))
+        else None
     )
     wordlist = (
         {"size": wordlist_fingerprint.size, "sha256": wordlist_fingerprint.sha256}

@@ -108,8 +108,8 @@ class MaskAttack:
     custom_charsets: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        if not isinstance(self.custom_charsets, tuple) or len(self.custom_charsets) > 8:
-            raise ConfigurationError("mask supports at most eight custom charsets")
+        if not isinstance(self.custom_charsets, tuple) or len(self.custom_charsets) > 4:
+            raise ConfigurationError("mask supports at most four custom charsets")
         if any(not isinstance(charset, str) or not charset for charset in self.custom_charsets):
             raise ConfigurationError("custom charsets cannot be empty")
 

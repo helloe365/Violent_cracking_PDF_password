@@ -52,8 +52,13 @@ SMART_RULES = (
 
 def iter_smart_variants(word: str) -> Iterator[str]:
     """Yield distinct smart-rule mutations in rule-file order, excluding ``word``."""
+    yield from iter_rule_variants(word, SMART_RULES)
+
+
+def iter_rule_variants(word: str, rules: tuple[str, ...]) -> Iterator[str]:
+    """Yield distinct variants for the CPU-supported smart rules."""
     seen = {word}
-    for rule in SMART_RULES:
+    for rule in rules:
         variant = _apply_smart_rule(word, rule)
         if variant not in seen:
             seen.add(variant)
@@ -135,8 +140,8 @@ def compile_mask(mask: str, custom_charsets: tuple[str, ...] = ()) -> tuple[str,
     if not mask:
         raise MaskSyntaxError("mask cannot be empty")
 
-    if not isinstance(custom_charsets, tuple) or len(custom_charsets) > 8:
-        raise MaskSyntaxError("mask supports at most eight custom charsets")
+    if not isinstance(custom_charsets, tuple) or len(custom_charsets) > 4:
+        raise MaskSyntaxError("mask supports at most four custom charsets")
     if any(not isinstance(charset, str) or not charset for charset in custom_charsets):
         raise MaskSyntaxError("custom charsets cannot be empty")
 

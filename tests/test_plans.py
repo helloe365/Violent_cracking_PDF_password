@@ -139,11 +139,19 @@ def test_profiles_are_deterministic_and_only_thorough_ends_in_bounded_brute(
     balanced = built_in_plan("balanced", tmp_path / "protected.pdf", 4, 6, hints)
     thorough = built_in_plan("thorough", tmp_path / "protected.pdf", 4, 6, hints)
 
-    assert tuple(stage.type for stage in fast.stages) == ("dictionary", "mask", "mask", "mask")
+    assert tuple(stage.type for stage in fast.stages) == ("dictionary", "mask", "mask")
     assert any(isinstance(stage, RulesStage) for stage in balanced.stages)
     assert any(getattr(stage, "wordlist", None) == hints for stage in balanced.stages)
     assert thorough.stages[-1].type == "brute"
     assert all(stage.type != "brute" for stage in (*fast.stages, *balanced.stages))
+
+
+def test_profiles_skip_fixed_masks_outside_user_bounds(tmp_path: Path) -> None:
+    plan = built_in_plan("thorough", tmp_path / "protected.pdf", 5, 7)
+
+    mask_ids = {stage.id for stage in plan.stages if stage.type == "mask"}
+    assert "pin6" in mask_ids
+    assert not {"pin4", "pin8", "lower-mask", "upper-mask"} & mask_ids
 
 
 def test_compile_plan_marks_external_rules_hashcat_required_and_cpu_refuses_them(
