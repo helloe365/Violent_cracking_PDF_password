@@ -4,6 +4,7 @@ import math
 import string
 from collections.abc import Iterator
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from .errors import ConfigurationError, MaskSyntaxError
 from .models import IndexRange
@@ -51,8 +52,13 @@ SMART_RULES = (
 
 def iter_smart_variants(word: str) -> Iterator[str]:
     """Yield distinct smart-rule mutations in rule-file order, excluding ``word``."""
+    yield from iter_rule_variants(word, SMART_RULES)
+
+
+def iter_rule_variants(word: str, rules: tuple[str, ...]) -> Iterator[str]:
+    """Yield distinct variants for the CPU-supported smart rules."""
     seen = {word}
-    for rule in SMART_RULES:
+    for rule in rules:
         variant = _apply_smart_rule(word, rule)
         if variant not in seen:
             seen.add(variant)
@@ -117,8 +123,8 @@ class MaskSpace:
         object.__setattr__(self, "_total", math.prod(len(position) for position in self.positions))
 
     @classmethod
-    def compile(cls, mask: str) -> MaskSpace:
-        return cls(compile_mask(mask))
+    def compile(cls, mask: str, custom_charsets: tuple[str, ...] = ()) -> MaskSpace:
+        return cls(compile_mask(mask, custom_charsets))
 
     @property
     def total(self) -> int:
@@ -130,10 +136,22 @@ class MaskSpace:
         return _candidate_at_unchecked(self.positions, index)
 
 
-def compile_mask(mask: str) -> tuple[str, ...]:
+def compile_mask(mask: str, custom_charsets: tuple[str, ...] = ()) -> tuple[str, ...]:
     if not mask:
         raise MaskSyntaxError("mask cannot be empty")
 
+    if not isinstance(custom_charsets, tuple) or len(custom_charsets) > 8:
+        raise MaskSyntaxError("mask supports at most eight custom charsets")
+    if any(not isinstance(charset, str) or not charset for charset in custom_charsets):
+        raise MaskSyntaxError("custom charsets cannot be empty")
+
+    resolved_custom: list[str] = []
+    for charset in custom_charsets:
+        resolved_custom.append("".join(_compile_mask_tokens(charset, tuple(resolved_custom))))
+    return _compile_mask_tokens(mask, tuple(resolved_custom))
+
+
+def _compile_mask_tokens(mask: str, custom_charsets: tuple[str, ...]) -> tuple[str, ...]:
     positions: list[str] = []
     index = 0
     while index < len(mask):
@@ -145,12 +163,81 @@ def compile_mask(mask: str) -> tuple[str, ...]:
         if index + 1 == len(mask):
             raise MaskSyntaxError("mask ends with an incomplete token")
         token = mask[index + 1]
-        try:
-            positions.append(MASK_CHARSETS[token])
-        except KeyError as exc:
-            raise MaskSyntaxError(f"unsupported mask token '?{token}'") from exc
+        if token in "12345678":
+            custom_index = int(token) - 1
+            if custom_index >= len(custom_charsets):
+                raise MaskSyntaxError(f"undefined custom mask token '?{token}'")
+            positions.append(custom_charsets[custom_index])
+        else:
+            try:
+                positions.append(MASK_CHARSETS[token])
+            except KeyError as exc:
+                raise MaskSyntaxError(f"unsupported mask token '?{token}'") from exc
         index += 2
     return tuple(positions)
+
+
+@dataclass(frozen=True, slots=True)
+class HybridSpace:
+    wordlist: Path
+    encoding: str
+    mask_space: MaskSpace
+    direction: str
+    _word_count: int = field(init=False, repr=False)
+    _total: int = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        if self.direction not in {"append", "prepend"}:
+            raise ConfigurationError("hybrid direction must be 'append' or 'prepend'")
+        words = _count_words(self.wordlist, self.encoding)
+        object.__setattr__(self, "_word_count", words)
+        object.__setattr__(self, "_total", words * self.mask_space.total)
+
+    @property
+    def total(self) -> int:
+        return self._total
+
+    def candidate_at(self, index: int) -> str:
+        if index < 0 or index >= self._total:
+            raise IndexError("candidate index out of range")
+        word_index, mask_index = divmod(index, self.mask_space.total)
+        word = _word_at(self.wordlist, self.encoding, word_index)
+        suffix = self.mask_space.candidate_at(mask_index)
+        return word + suffix if self.direction == "append" else suffix + word
+
+    def iter_candidates(self, start: int = 0, stop: int | None = None) -> Iterator[str]:
+        stop = self._total if stop is None else stop
+        if start < 0 or stop < start or stop > self._total:
+            raise IndexError("candidate range is out of bounds")
+        for index in range(start, stop):
+            yield self.candidate_at(index)
+
+
+def _count_words(path: Path, encoding: str) -> int:
+    try:
+        with Path(path).open("r", encoding=encoding, errors="strict", newline=None) as source:
+            return sum(1 for _ in source)
+    except UnicodeDecodeError as exc:
+        raise ConfigurationError(f"cannot decode wordlist using {encoding}") from exc
+    except LookupError as exc:
+        raise ConfigurationError(f"unknown wordlist encoding: {encoding}") from exc
+    except OSError as exc:
+        raise ConfigurationError(f"cannot read wordlist: {exc}") from exc
+
+
+def _word_at(path: Path, encoding: str, target: int) -> str:
+    try:
+        with Path(path).open("r", encoding=encoding, errors="strict", newline=None) as source:
+            for index, line in enumerate(source):
+                if index == target:
+                    return line.rstrip("\r\n")
+    except UnicodeDecodeError as exc:
+        raise ConfigurationError(f"cannot decode wordlist using {encoding}") from exc
+    except LookupError as exc:
+        raise ConfigurationError(f"unknown wordlist encoding: {encoding}") from exc
+    except OSError as exc:
+        raise ConfigurationError(f"cannot read wordlist: {exc}") from exc
+    raise AssertionError("validated hybrid word index was not resolved")
 
 
 @dataclass(frozen=True, slots=True)

@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import argparse
 import codecs
+import json
 import os
 import re
 import sys
 import tempfile
 from collections.abc import Callable, Sequence
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TextIO
 
@@ -14,14 +16,18 @@ from tqdm import tqdm
 
 from .candidates import BruteSpace, MaskSpace
 from .errors import ConfigurationError, RecoveryError
+from .events import JsonLineSink
 from .models import (
     BackendChoice,
     BruteAttack,
     DictionaryAttack,
+    HybridAttack,
     MaskAttack,
     OutcomeStatus,
     Progress,
     RecoveryConfig,
+    RulesAttack,
+    WorkloadProfile,
 )
 from .wordlists import iter_wordlist_chunks
 
@@ -384,6 +390,8 @@ def entrypoint(
     try:
         effective_argv = tuple(sys.argv[1:] if argv is None else argv)
         tty = sys.stdin.isatty() if is_tty is None else is_tty
+        if effective_argv and effective_argv[0] in {"plan", "preflight", "sessions"}:
+            return _new_entrypoint(effective_argv, input_fn, output, error, tty)
         if not effective_argv and tty:
             return _smart_entrypoint(input_fn, output)
         config = parse_config(effective_argv, input_fn=input_fn, is_tty=tty)
@@ -432,3 +440,294 @@ def entrypoint(
 
 def main(argv: Sequence[str] | None = None) -> int:
     return entrypoint(argv)
+
+
+def _new_entrypoint(
+    argv: Sequence[str],
+    input_fn: Callable[[str], str],
+    output: TextIO,
+    error: TextIO,
+    tty: bool,
+) -> int:
+    command = argv[0]
+    try:
+        if command == "plan":
+            return _plan_command(argv[1:], input_fn, output, tty)
+        if command == "preflight":
+            return _preflight_command(argv[1:], output)
+        return _sessions_command(argv[1:], input_fn, output, tty)
+    except KeyboardInterrupt:
+        return 130
+    except (RecoveryError, OSError, UnicodeError, EOFError) as exc:
+        print(f"Error: {exc}", file=error)
+        return 2
+
+
+def _common_new_parser(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--backend", choices=("auto", "hashcat", "cpu"), default="auto")
+    parser.add_argument("--workers", type=int, default=1)
+    parser.add_argument("--workload", choices=("quiet", "balanced", "fast"), default="balanced")
+    parser.add_argument("--device", default="auto")
+    parser.add_argument("--session")
+    parser.add_argument("--output", type=Path)
+    parser.add_argument("--json", action="store_true")
+    parser.add_argument("--yes", action="store_true")
+
+
+def _plan_command(
+    argv: Sequence[str], input_fn: Callable[[str], str], output: TextIO, tty: bool
+) -> int:
+    parser = _Parser(prog="pdf-password-recovery plan")
+    parser.add_argument("pdf", type=Path)
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("--profile", choices=("fast", "balanced", "thorough"))
+    group.add_argument("--file", type=Path)
+    parser.add_argument("--min-length", type=int, default=4)
+    parser.add_argument("--max-length", type=int, default=6)
+    parser.add_argument("--hints-file", type=Path)
+    parser.add_argument("--dry-run", action="store_true")
+    _common_new_parser(parser)
+    ns = parser.parse_args(argv)
+    if ns.workers < 1 or ns.min_length < 1 or ns.max_length < ns.min_length:
+        raise ConfigurationError("invalid workers or password length range")
+    from .orchestrator import run_plan
+    from .plans import built_in_plan, compile_plan, load_plan
+
+    if ns.file is not None:
+        plan = load_plan(ns.file)
+        base_dir = ns.file.resolve().parent
+    else:
+        plan = built_in_plan(ns.profile, ns.pdf, ns.min_length, ns.max_length, ns.hints_file)
+        base_dir = ns.pdf.resolve().parent
+    compiled = compile_plan(plan, base_dir=base_dir, backend=BackendChoice(ns.backend))
+    _validate_plan_output(ns.output, ns.pdf, ns.file, ns.hints_file, compiled)
+    sink = JsonLineSink(output) if ns.json else None
+    if ns.dry_run:
+        if ns.backend != "cpu":
+            from .backends.hashcat_info import run_preflight
+            from .events import EventType, RecoveryEvent
+
+            try:
+                report = run_preflight(ns.pdf, ns.workload, ns.device)
+                if sink is not None:
+                    sink.emit(
+                        RecoveryEvent(
+                            EventType.PREFLIGHT,
+                            {
+                                "status": "ready",
+                                "backend": "hashcat",
+                                "device_ids": [device.id for device in report.selected_devices],
+                                "tool_version": report.capabilities.version,
+                                "workload": report.workload.value,
+                                "pdf_mode": report.pdf_mode,
+                            },
+                            session=ns.session,
+                        )
+                    )
+            except RecoveryError:
+                if sink is not None:
+                    sink.emit(
+                        RecoveryEvent(
+                            EventType.PREFLIGHT,
+                            {
+                                "status": "unavailable",
+                                "backend": "hashcat",
+                                "device_ids": [],
+                                "tool_version": "0.0",
+                                "workload": ns.workload,
+                            },
+                            session=ns.session,
+                        )
+                    )
+                elif not ns.json:
+                    print("hashcat 预检不可用，预计时间未知", file=output)
+        if ns.json:
+            for index, stage in enumerate(compiled.stages):
+                sink.emit(
+                    RecoveryEvent(
+                        EventType.STAGE_STARTED,
+                        {
+                            "stage_id": stage.id.replace(":", "-"),
+                            "stage_index": index,
+                            "stage_count": len(compiled.stages),
+                            "backend": ns.backend,
+                            "workload": ns.workload,
+                            "total": stage.keyspace,
+                        },
+                        session=ns.session,
+                    )
+                )
+        else:
+            print(f"计划: {compiled.name}", file=output)
+            for stage in compiled.stages:
+                print(
+                    f"- {stage.id}: {stage.attack.kind.value}, keyspace={stage.keyspace}",
+                    file=output,
+                )
+        return 0
+    if not ns.yes and not tty:
+        raise ConfigurationError("non-interactive use requires --yes")
+    if not ns.yes and input_fn("确认开始恢复? [y/N]: ").strip().lower() not in {"y", "yes"}:
+        print("已取消。", file=output)
+        return 2
+    outcome = run_plan(
+        compiled,
+        pdf_path=ns.pdf,
+        backend=BackendChoice(ns.backend),
+        workers=ns.workers,
+        workload=WorkloadProfile(ns.workload),
+        requested_devices=ns.device,
+        session=ns.session,
+        output=ns.output,
+        event_sink=sink,
+    )
+    if ns.json:
+        return (
+            0
+            if outcome.status is OutcomeStatus.FOUND
+            else 130
+            if outcome.status is OutcomeStatus.INTERRUPTED
+            else 1
+        )
+    if outcome.status is OutcomeStatus.FOUND:
+        if outcome.password is not None:
+            print(f"密码长度: {len(outcome.password)}", file=output)
+        print("恢复成功!", file=output)
+        return 0
+    if outcome.status is OutcomeStatus.INTERRUPTED:
+        print("已中断；检查点已保存。", file=output)
+        return 130
+    print("搜索完成，未找到密码。", file=output)
+    return 1
+
+
+def _preflight_command(argv: Sequence[str], output: TextIO) -> int:
+    parser = _Parser(prog="pdf-password-recovery preflight")
+    parser.add_argument("pdf", type=Path)
+    parser.add_argument("--workload", choices=("quiet", "balanced", "fast"), default="balanced")
+    parser.add_argument("--device", default="auto")
+    parser.add_argument("--refresh", action="store_true")
+    parser.add_argument("--json", action="store_true")
+    ns = parser.parse_args(argv)
+    from .backends.hashcat_info import run_preflight
+
+    report = run_preflight(ns.pdf, ns.workload, ns.device, ns.refresh)
+    if ns.json:
+        from .events import EventType, RecoveryEvent
+
+        JsonLineSink(output).emit(
+            RecoveryEvent(
+                EventType.PREFLIGHT,
+                {
+                    "status": "ready",
+                    "backend": "hashcat",
+                    "device_ids": [device.id for device in report.selected_devices],
+                    "tool_version": report.capabilities.version,
+                    "workload": report.workload.value,
+                    "pdf_mode": report.pdf_mode,
+                },
+            )
+        )
+    else:
+        print(f"hashcat {report.capabilities.version}; PDF mode {report.pdf_mode}", file=output)
+        print(f"设备: {', '.join(device.id for device in report.selected_devices)}", file=output)
+        print(f"基准速度: {report.benchmark_hps or 'unknown'} H/s", file=output)
+    return 0
+
+
+def _validate_plan_output(
+    output: Path | None,
+    pdf: Path,
+    plan_file: Path | None,
+    hints_file: Path | None,
+    compiled: object,
+) -> None:
+    if output is None:
+        return
+    output_path = output.expanduser().resolve(strict=False)
+    input_paths = {pdf.expanduser().resolve(strict=False)}
+    if plan_file is not None:
+        input_paths.add(plan_file.expanduser().resolve(strict=False))
+    if hints_file is not None:
+        input_paths.add(hints_file.expanduser().resolve(strict=False))
+    for stage in compiled.stages:
+        attack = stage.attack
+        if isinstance(attack, (DictionaryAttack, RulesAttack, HybridAttack)):
+            input_paths.add(attack.wordlist.expanduser().resolve(strict=False))
+        source = stage.source
+        mask_file = getattr(source, "mask_file", None)
+        if mask_file is not None:
+            input_paths.add(Path(mask_file).expanduser().resolve(strict=False))
+    if output_path in input_paths:
+        raise ConfigurationError("output path must differ from plan input files")
+
+
+def _session_json(summary: object) -> str:
+    from dataclasses import asdict
+
+    value = asdict(summary)
+    value["status"] = value["status"].value
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+def _sessions_command(
+    argv: Sequence[str], input_fn: Callable[[str], str], output: TextIO, tty: bool
+) -> int:
+    parser = _Parser(prog="pdf-password-recovery sessions")
+    parser.add_argument("action", choices=("list", "show", "delete", "prune"))
+    parser.add_argument("name", nargs="?")
+    parser.add_argument("--older-than", type=int, default=0)
+    parser.add_argument("--json", action="store_true")
+    parser.add_argument("--yes", action="store_true")
+    ns = parser.parse_args(argv)
+    from .orchestrator import _state_root
+    from .sessions import SessionStore
+
+    store = SessionStore(_state_root())
+    if ns.action == "list":
+        values = store.list()
+        if ns.json:
+            for value in values:
+                print(_session_json(value), file=output)
+        else:
+            for value in values:
+                print(
+                    f"{value.name}\t{value.status.value}\t{value.completed}/{value.total}",
+                    file=output,
+                )
+        return 0
+    if ns.action == "show":
+        if not ns.name:
+            raise ConfigurationError("sessions show requires NAME")
+        value = store.load(ns.name)
+        print(
+            _session_json(value) if ns.json else f"{value.name}: {value.status.value}", file=output
+        )
+        return 0
+    if not ns.yes and not tty:
+        raise ConfigurationError("non-interactive use requires --yes")
+    if not ns.yes and input_fn("确认删除会话? [y/N]: ").strip().lower() not in {"y", "yes"}:
+        return 2
+    if ns.action == "delete":
+        if not ns.name:
+            raise ConfigurationError("sessions delete requires NAME")
+        store.delete(ns.name)
+        return 0
+    if ns.older_than < 0:
+        raise ConfigurationError("--older-than must be non-negative")
+    if ns.older_than:
+        cutoff = datetime.now(UTC) - timedelta(days=ns.older_than)
+        deleted = []
+        for summary in store.list():
+            if summary.status.value in {"found", "exhausted", "failed"}:
+                updated = datetime.fromisoformat(summary.updated_at.removesuffix("Z") + "+00:00")
+                if updated < cutoff:
+                    store.delete(summary.name)
+                    deleted.append(summary.name)
+    else:
+        deleted = store.prune()
+    if ns.json:
+        print(json.dumps({"deleted": deleted}, ensure_ascii=False), file=output)
+    else:
+        print(f"已删除 {len(deleted)} 个会话", file=output)
+    return 0

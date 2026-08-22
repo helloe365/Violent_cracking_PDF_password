@@ -12,18 +12,26 @@ from typing import TypeAlias
 
 from pypdf import PdfReader
 
-from ..candidates import BruteSpace, MaskSpace, iter_smart_variants
+from ..candidates import (
+    BruteSpace,
+    HybridSpace,
+    MaskSpace,
+    iter_rule_variants,
+    iter_smart_variants,
+)
 from ..errors import ConfigurationError, WordlistDecodeError, WorkerExecutionError
 from ..models import (
     Cursor,
     CursorKind,
     DictionaryAttack,
+    HybridAttack,
     IndexRange,
     MaskAttack,
     OutcomeStatus,
     Progress,
     RecoveryConfig,
     RecoveryOutcome,
+    RulesAttack,
 )
 from ..wordlists import WordlistChunk, iter_wordlist_chunks
 
@@ -99,9 +107,13 @@ class _TaskProvider:
         self.attack = config.attack
         self.next_value = cursor.value
         self._dictionary: Iterator[WordlistChunk] | None = None
-        if isinstance(self.attack, DictionaryAttack):
+        if isinstance(self.attack, (DictionaryAttack, RulesAttack)):
             self.total = _count_wordlist(self.attack.wordlist, self.attack.encoding)
-            chunk_options = {"chunk_candidates": 256} if self.attack.apply_rules else {}
+            chunk_options = (
+                {"chunk_candidates": 256}
+                if isinstance(self.attack, RulesAttack) or self.attack.apply_rules
+                else {}
+            )
             self._dictionary = iter_wordlist_chunks(
                 self.attack.wordlist,
                 encoding=self.attack.encoding,
@@ -109,7 +121,15 @@ class _TaskProvider:
                 **chunk_options,
             )
         elif isinstance(self.attack, MaskAttack):
-            self.total = MaskSpace.compile(self.attack.mask).total
+            self.total = MaskSpace.compile(self.attack.mask, self.attack.custom_charsets).total
+        elif isinstance(self.attack, HybridAttack):
+            space = HybridSpace(
+                self.attack.wordlist,
+                self.attack.encoding,
+                MaskSpace.compile(self.attack.mask),
+                self.attack.direction,
+            )
+            self.total = space.total
         else:
             self.total = BruteSpace.create(
                 self.attack.charset, self.attack.min_length, self.attack.max_length
@@ -149,7 +169,9 @@ def run_cpu(
     progress: ProgressCallback | None = None,
 ) -> RecoveryOutcome:
     expected_kind = (
-        CursorKind.LINE if isinstance(config.attack, DictionaryAttack) else CursorKind.INDEX
+        CursorKind.LINE
+        if isinstance(config.attack, (DictionaryAttack, RulesAttack))
+        else CursorKind.INDEX
     )
     start_cursor = cursor or Cursor(expected_kind, 0)
     if start_cursor.kind is not expected_kind:
@@ -344,14 +366,24 @@ def _worker_main(pdf_path: str, attack, task_queue, result_queue, stop_event) ->
 
 
 def _candidate_space(attack):
-    if isinstance(attack, DictionaryAttack):
+    if isinstance(attack, (DictionaryAttack, RulesAttack)):
         return None
     if isinstance(attack, MaskAttack):
-        return MaskSpace.compile(attack.mask)
+        return MaskSpace.compile(attack.mask, attack.custom_charsets)
+    if isinstance(attack, HybridAttack):
+        return HybridSpace(
+            attack.wordlist,
+            attack.encoding,
+            MaskSpace.compile(attack.mask),
+            attack.direction,
+        )
     return BruteSpace.create(attack.charset, attack.min_length, attack.max_length)
 
 
-def _dictionary_variants(attack: DictionaryAttack, word: str) -> Iterator[str]:
+def _dictionary_variants(attack: DictionaryAttack | RulesAttack, word: str) -> Iterator[str]:
+    if isinstance(attack, RulesAttack):
+        yield from iter_rule_variants(word, attack.rules)
+        return
     if attack.apply_rules:
         yield from iter_smart_variants(word)
         return

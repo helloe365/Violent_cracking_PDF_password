@@ -1,9 +1,11 @@
 class RecoveryError(Exception):
     """Base error shown to CLI users."""
 
+    code = "recovery"
+
 
 class ConfigurationError(RecoveryError, ValueError):
-    pass
+    code = "configuration"
 
 
 class MaskSyntaxError(ConfigurationError):
@@ -12,6 +14,10 @@ class MaskSyntaxError(ConfigurationError):
 
 class WordlistDecodeError(ConfigurationError):
     pass
+
+
+class PlanSchemaError(ConfigurationError):
+    code = "plan_schema"
 
 
 class PdfValidationError(RecoveryError):
@@ -26,8 +32,16 @@ class SessionMismatch(CheckpointError):
     pass
 
 
+class ActiveSession(RecoveryError):
+    code = "active_session"
+
+
 class BackendError(RecoveryError):
     pass
+
+
+class CapabilityError(BackendError):
+    code = "capability"
 
 
 class ToolUnavailable(BackendError):

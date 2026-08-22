@@ -19,8 +19,10 @@ from .models import (
     Cursor,
     CursorKind,
     DictionaryAttack,
+    HybridAttack,
     MaskAttack,
     RecoveryConfig,
+    RulesAttack,
 )
 
 SCHEMA_VERSION = 1
@@ -39,7 +41,7 @@ class Checkpoint:
     schema: int
     backend: str
     pdf: FileFingerprint
-    attack: dict[str, str | int | None]
+    attack: dict[str, Any]
     wordlist: FileFingerprint | None
     cursor: Cursor
 
@@ -58,7 +60,7 @@ def file_fingerprint(path: Path) -> FileFingerprint:
     return FileFingerprint(size=size, sha256=digest.hexdigest())
 
 
-def normalize_attack(attack: AttackSpec) -> dict[str, str | int | None]:
+def normalize_attack(attack: AttackSpec) -> dict[str, Any]:
     """Return only attack settings that affect candidate generation."""
     if isinstance(attack, DictionaryAttack):
         normalized: dict[str, str | int | None] = {
@@ -75,7 +77,26 @@ def normalize_attack(attack: AttackSpec) -> dict[str, str | int | None]:
             )
         return normalized
     if isinstance(attack, MaskAttack):
-        return {"kind": "mask", "mask": attack.mask}
+        return {
+            "kind": "mask",
+            "mask": attack.mask,
+            "custom_charsets": list(attack.custom_charsets),
+        }
+    if isinstance(attack, RulesAttack):
+        return {
+            "kind": "rules",
+            "encoding": attack.encoding,
+            "rules": list(attack.rules),
+            "min_length": attack.min_length,
+            "max_length": attack.max_length,
+        }
+    if isinstance(attack, HybridAttack):
+        return {
+            "kind": "hybrid",
+            "encoding": attack.encoding,
+            "mask": attack.mask,
+            "direction": attack.direction,
+        }
     if isinstance(attack, BruteAttack):
         return {
             "kind": "brute",
@@ -88,7 +109,9 @@ def normalize_attack(attack: AttackSpec) -> dict[str, str | int | None]:
 
 def build_checkpoint(config: RecoveryConfig, cursor: Cursor) -> Checkpoint:
     expected_kind = (
-        CursorKind.LINE if isinstance(config.attack, DictionaryAttack) else CursorKind.INDEX
+        CursorKind.LINE
+        if isinstance(config.attack, (DictionaryAttack, RulesAttack))
+        else CursorKind.INDEX
     )
     if cursor.kind is not expected_kind:
         raise CheckpointError(
@@ -96,7 +119,7 @@ def build_checkpoint(config: RecoveryConfig, cursor: Cursor) -> Checkpoint:
         )
     wordlist = (
         file_fingerprint(config.attack.wordlist)
-        if isinstance(config.attack, DictionaryAttack)
+        if isinstance(config.attack, (DictionaryAttack, RulesAttack, HybridAttack))
         else None
     )
     return Checkpoint(
@@ -164,14 +187,16 @@ def validate_checkpoint(checkpoint: Checkpoint, config: RecoveryConfig) -> None:
 
     expected_wordlist = (
         file_fingerprint(config.attack.wordlist)
-        if isinstance(config.attack, DictionaryAttack)
+        if isinstance(config.attack, (DictionaryAttack, RulesAttack, HybridAttack))
         else None
     )
     if checkpoint.wordlist != expected_wordlist:
         raise SessionMismatch("wordlist fingerprint does not match the checkpoint")
 
     expected_cursor = (
-        CursorKind.LINE if isinstance(config.attack, DictionaryAttack) else CursorKind.INDEX
+        CursorKind.LINE
+        if isinstance(config.attack, (DictionaryAttack, RulesAttack))
+        else CursorKind.INDEX
     )
     if checkpoint.cursor.kind is not expected_cursor:
         raise SessionMismatch("cursor type does not match the attack")
@@ -236,7 +261,7 @@ def _from_payload(payload: object) -> Checkpoint:
     )
 
 
-def _parse_attack(mapping: Mapping[str, Any]) -> dict[str, str | int | None]:
+def _parse_attack(mapping: Mapping[str, Any]) -> dict[str, Any]:
     kind = _require_str(mapping, "kind")
     if kind == "dictionary":
         attack: dict[str, str | int | None] = {
@@ -250,7 +275,32 @@ def _parse_attack(mapping: Mapping[str, Any]) -> dict[str, str | int | None]:
             attack["ruleset_version"] = _require_int(mapping, "ruleset_version")
         return attack
     if kind == "mask":
-        return {"kind": kind, "mask": _require_str(mapping, "mask")}
+        custom = mapping.get("custom_charsets", [])
+        if not isinstance(custom, list) or any(not isinstance(item, str) for item in custom):
+            raise TypeError("custom_charsets must be an array of strings")
+        return {"kind": kind, "mask": _require_str(mapping, "mask"), "custom_charsets": custom}
+    if kind == "rules":
+        rules = mapping.get("rules")
+        if not isinstance(rules, list) or any(not isinstance(item, str) for item in rules):
+            raise TypeError("rules must be an array of strings")
+        has_min = "min_length" in mapping
+        has_max = "max_length" in mapping
+        if has_min != has_max:
+            raise TypeError("rules length bounds must be provided together")
+        return {
+            "kind": kind,
+            "encoding": _require_str(mapping, "encoding"),
+            "rules": rules,
+            "min_length": _require_optional_int(mapping, "min_length") if has_min else None,
+            "max_length": _require_optional_int(mapping, "max_length") if has_max else None,
+        }
+    if kind == "hybrid":
+        return {
+            "kind": kind,
+            "encoding": _require_str(mapping, "encoding"),
+            "mask": _require_str(mapping, "mask"),
+            "direction": _require_str(mapping, "direction"),
+        }
     if kind == "brute":
         return {
             "kind": kind,
