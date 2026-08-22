@@ -7,12 +7,19 @@ from io import StringIO
 
 import pytest
 
-from pdf_password_recovery import EventType, JsonLineSink, RecoveryEvent, event_payload
+from pdf_password_recovery import (
+    EventMessage,
+    EventType,
+    JsonLineSink,
+    RecoveryEvent,
+    event_payload,
+)
 from pdf_password_recovery.errors import CapabilityError, ConfigurationError, PlanSchemaError
 
 
-class _FixedStatus(StrEnum):
-    READY = "准备"
+class _UnsafeStatus(StrEnum):
+    PDF_HASH = "$pdf$5*5*example"
+    HINT = "密码提示：北京"
 
 
 def test_json_line_sink_writes_the_schema_one_event_contract() -> None:
@@ -41,7 +48,7 @@ def test_json_line_sink_writes_the_schema_one_event_contract() -> None:
 
 
 def test_event_defaults_to_a_utc_schema_one_timestamp() -> None:
-    event = RecoveryEvent(type=EventType.PREFLIGHT, payload={})
+    event = RecoveryEvent(type=EventType.PREFLIGHT, payload={"status": "ready"})
 
     assert event.schema == 1
     assert event.timestamp.endswith("Z")
@@ -50,7 +57,7 @@ def test_event_defaults_to_a_utc_schema_one_timestamp() -> None:
     ).utcoffset() == timedelta(0)
 
 
-def test_json_line_sink_preserves_fixed_enum_unicode_characters() -> None:
+def test_json_line_sink_preserves_controlled_unicode_message_characters() -> None:
     stream = StringIO()
 
     JsonLineSink(stream).emit(
@@ -58,11 +65,11 @@ def test_json_line_sink_preserves_fixed_enum_unicode_characters() -> None:
             type=EventType.WARNING,
             timestamp="2026-08-22T12:34:56Z",
             session=None,
-            payload={"status": _FixedStatus.READY},
+            payload={"message": EventMessage.READY},
         )
     )
 
-    assert '"status":"准备"' in stream.getvalue()
+    assert '"message":"已就绪"' in stream.getvalue()
     assert "\\u" not in stream.getvalue()
 
 
@@ -84,11 +91,11 @@ def test_event_rejects_sensitive_keys_at_any_nested_mapping_depth(
 
 
 def test_event_payload_rechecks_mutated_nested_payloads() -> None:
-    payload: dict[str, object] = {"stage": {"id": EventType.STAGE_STARTED}}
-    event = RecoveryEvent(type=EventType.CHECKPOINT, payload=payload)
-    nested = payload["stage"]
-    assert isinstance(nested, dict)
-    nested["password"] = "secret"
+    payload: dict[str, object] = {"device_ids": []}
+    event = RecoveryEvent(type=EventType.PREFLIGHT, payload=payload)
+    nested = payload["device_ids"]
+    assert isinstance(nested, list)
+    nested.append({"password": EventMessage.CONFIGURATION_INVALID})
 
     with pytest.raises(ConfigurationError) as raised:
         event_payload(event)
@@ -111,18 +118,18 @@ def test_event_rejects_free_text_at_any_nested_depth(payload: dict[str, object])
 
 def test_event_allows_hint_counts_and_fixed_enum_statuses() -> None:
     event = RecoveryEvent(
-        type=EventType.PROGRESS,
+        type=EventType.PREFLIGHT,
         payload={
             "hint_count": 2,
-            "status": _FixedStatus.READY,
-            "nested": [{"completed": 4, "kind": EventType.PROGRESS}],
+            "status": "ready",
+            "device_ids": ["1"],
         },
     )
 
     assert event_payload(event)["payload"] == {
         "hint_count": 2,
-        "status": _FixedStatus.READY,
-        "nested": [{"completed": 4, "kind": EventType.PROGRESS}],
+        "status": "ready",
+        "device_ids": ["1"],
     }
 
 
@@ -137,9 +144,9 @@ def test_json_line_sink_rejects_sensitive_data_mutated_after_event_construction(
     key: str,
     value: str,
 ) -> None:
-    payload: dict[str, object] = {"nested": []}
-    event = RecoveryEvent(type=EventType.ERROR, payload=payload)
-    nested = payload["nested"]
+    payload: dict[str, object] = {"device_ids": []}
+    event = RecoveryEvent(type=EventType.PREFLIGHT, payload=payload)
+    nested = payload["device_ids"]
     assert isinstance(nested, list)
     nested.append({key: value})
     stream = StringIO()
@@ -150,8 +157,116 @@ def test_json_line_sink_rejects_sensitive_data_mutated_after_event_construction(
     assert stream.getvalue() == ""
 
 
+@pytest.mark.parametrize(
+    "event_type,payload",
+    [
+        (
+            EventType.PREFLIGHT,
+            {
+                "status": "ready",
+                "backend": "hashcat",
+                "device_ids": ["1"],
+                "tool_version": "7.1.2",
+                "workload": "balanced",
+                "pdf_mode": 10500,
+            },
+        ),
+        (
+            EventType.STAGE_STARTED,
+            {
+                "stage_id": "dictionary",
+                "stage_index": 0,
+                "stage_count": 3,
+                "backend": "cpu",
+                "workload": "quiet",
+                "total": 100,
+            },
+        ),
+        (
+            EventType.PROGRESS,
+            {
+                "stage_id": "dictionary",
+                "completed": 10,
+                "total": 100,
+                "attempted": 10,
+                "elapsed_seconds": 1.5,
+                "rate": 7.0,
+                "backend": "cpu",
+                "workers": 2,
+            },
+        ),
+        (
+            EventType.WARNING,
+            {
+                "code": "capability",
+                "message": EventMessage.HASHCAT_UNAVAILABLE,
+                "backend": "hashcat",
+            },
+        ),
+        (
+            EventType.CHECKPOINT,
+            {
+                "stage_id": "dictionary",
+                "completed": 10,
+                "total": 100,
+                "checkpoint_status": "saved",
+            },
+        ),
+        (
+            EventType.RESULT,
+            {
+                "status": "found",
+                "stage_id": "dictionary",
+                "attempted": 10,
+                "elapsed_seconds": 1.5,
+                "backend": "cpu",
+                "output_path": "artifacts/result.json",
+            },
+        ),
+        (
+            EventType.ERROR,
+            {
+                "code": "configuration",
+                "message": EventMessage.CONFIGURATION_INVALID,
+                "stage_id": "dictionary",
+                "backend": "cpu",
+            },
+        ),
+    ],
+)
+def test_every_event_type_accepts_its_safe_payload(
+    event_type: EventType,
+    payload: dict[str, object],
+) -> None:
+    assert event_payload(RecoveryEvent(type=event_type, payload=payload))["payload"] == payload
+
+
+@pytest.mark.parametrize("session", ["../escape", "nested/name", "密码", "$pdf$5*5*example"])
+def test_event_rejects_unsafe_session_identifiers(session: str) -> None:
+    with pytest.raises(ConfigurationError):
+        RecoveryEvent(type=EventType.PROGRESS, session=session, payload={"completed": 1})
+
+
+@pytest.mark.parametrize(
+    "event_type,payload",
+    [
+        (EventType.WARNING, {"message": _UnsafeStatus.PDF_HASH}),
+        (EventType.WARNING, {"message": _UnsafeStatus.HINT}),
+        (EventType.PREFLIGHT, {"device_ids": [{"message": EventMessage.READY}]}),
+    ],
+)
+def test_event_rejects_unsafe_enum_and_nested_structure_bypasses(
+    event_type: EventType,
+    payload: dict[str, object],
+) -> None:
+    with pytest.raises(ConfigurationError):
+        RecoveryEvent(type=event_type, payload=payload)
+
+
 def test_json_line_sink_rejects_nonfinite_json_values() -> None:
-    event = RecoveryEvent(type=EventType.PROGRESS, payload={"rate": float("nan")})
+    payload: dict[str, object] = {"rate": 1.0}
+    event = RecoveryEvent(type=EventType.PROGRESS, payload=payload)
+    payload["rate"] = float("nan")
     stream = StringIO()
 
     with pytest.raises(ConfigurationError):

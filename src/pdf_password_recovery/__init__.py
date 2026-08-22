@@ -1,6 +1,6 @@
 """Local PDF password recovery package."""
 
-from .events import EventSink, EventType, JsonLineSink, RecoveryEvent, event_payload
+from .events import EventMessage, EventSink, EventType, JsonLineSink, RecoveryEvent, event_payload
 from .models import (
     BackendChoice,
     BruteAttack,
@@ -16,6 +16,7 @@ __all__ = [
     "BackendChoice",
     "BruteAttack",
     "DictionaryAttack",
+    "EventMessage",
     "EventSink",
     "EventType",
     "event_payload",

@@ -287,9 +287,8 @@ def test_second_process_cannot_lock_or_delete_a_held_session(tmp_path: Path) -> 
     process.start()
     try:
         assert acquired.wait(timeout=10)
-        with pytest.raises(ActiveSession):
-            with store.lock("cross-process"):
-                pass
+        with pytest.raises(ActiveSession), store.lock("cross-process"):
+            pass
         with pytest.raises(ActiveSession):
             store.delete("cross-process")
     finally:
