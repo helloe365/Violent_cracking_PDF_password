@@ -14,7 +14,9 @@ from .errors import ConfigurationError
 
 class AttackKind(StrEnum):
     DICTIONARY = "dictionary"
+    RULES = "rules"
     MASK = "mask"
+    HYBRID = "hybrid"
     BRUTE = "brute"
 
 
@@ -69,12 +71,57 @@ class DictionaryAttack:
 
 
 @dataclass(frozen=True, slots=True)
+class RulesAttack:
+    wordlist: Path
+    rules: tuple[str, ...]
+    encoding: str = "utf-8"
+    min_length: int | None = None
+    max_length: int | None = None
+
+    def __post_init__(self) -> None:
+        _validate_dictionary_bounds(self.min_length, self.max_length)
+        if (
+            not isinstance(self.rules, tuple)
+            or not self.rules
+            or any(not isinstance(rule, str) or not rule for rule in self.rules)
+        ):
+            raise ConfigurationError("rules must be a non-empty tuple of rule strings")
+
+    @property
+    def kind(self) -> AttackKind:
+        return AttackKind.RULES
+
+
+@dataclass(frozen=True, slots=True)
 class MaskAttack:
     mask: str
+    custom_charsets: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.custom_charsets, tuple) or len(self.custom_charsets) > 8:
+            raise ConfigurationError("mask supports at most eight custom charsets")
+        if any(not isinstance(charset, str) or not charset for charset in self.custom_charsets):
+            raise ConfigurationError("custom charsets cannot be empty")
 
     @property
     def kind(self) -> AttackKind:
         return AttackKind.MASK
+
+
+@dataclass(frozen=True, slots=True)
+class HybridAttack:
+    wordlist: Path
+    mask: str
+    direction: str
+    encoding: str = "utf-8"
+
+    def __post_init__(self) -> None:
+        if self.direction not in {"append", "prepend"}:
+            raise ConfigurationError("hybrid direction must be 'append' or 'prepend'")
+
+    @property
+    def kind(self) -> AttackKind:
+        return AttackKind.HYBRID
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,7 +135,159 @@ class BruteAttack:
         return AttackKind.BRUTE
 
 
-AttackSpec: TypeAlias = DictionaryAttack | MaskAttack | BruteAttack
+AttackSpec: TypeAlias = DictionaryAttack | RulesAttack | MaskAttack | HybridAttack | BruteAttack
+
+
+def _validate_dictionary_bounds(min_length: int | None, max_length: int | None) -> None:
+    if (min_length is None) != (max_length is None):
+        raise ConfigurationError("dictionary length bounds must be provided together")
+    if min_length is not None and max_length is not None:
+        if min_length < 1 or max_length < 1:
+            raise ConfigurationError("dictionary length bounds must be at least 1")
+        if max_length < min_length:
+            raise ConfigurationError("dictionary maximum length cannot be less than minimum length")
+
+
+def _validate_stage_id(value: str) -> None:
+    if not isinstance(value, str) or not value:
+        raise ConfigurationError("stage ID must be a non-empty string")
+
+
+@dataclass(frozen=True, slots=True)
+class DictionaryStage:
+    id: str
+    wordlist: Path
+    encoding: str = "utf-8"
+    min_length: int | None = None
+    max_length: int | None = None
+    type: str = field(default="dictionary", init=False)
+
+    def __post_init__(self) -> None:
+        _validate_stage_id(self.id)
+        _validate_dictionary_bounds(self.min_length, self.max_length)
+
+
+@dataclass(frozen=True, slots=True)
+class RulesStage:
+    id: str
+    wordlist: Path
+    rules: tuple[str, ...]
+    encoding: str = "utf-8"
+    min_length: int | None = None
+    max_length: int | None = None
+    type: str = field(default="rules", init=False)
+
+    def __post_init__(self) -> None:
+        _validate_stage_id(self.id)
+        _validate_dictionary_bounds(self.min_length, self.max_length)
+        if (
+            not isinstance(self.rules, tuple)
+            or not self.rules
+            or any(not isinstance(rule, str) or not rule for rule in self.rules)
+        ):
+            raise ConfigurationError("rules must be a non-empty tuple of rule strings")
+
+
+@dataclass(frozen=True, slots=True)
+class MaskStage:
+    id: str
+    mask: str | None = None
+    mask_file: Path | None = None
+    type: str = field(default="mask", init=False)
+
+    def __post_init__(self) -> None:
+        _validate_stage_id(self.id)
+        if (self.mask is None) == (self.mask_file is None):
+            raise ConfigurationError("mask stage requires exactly one of mask or mask_file")
+        if self.mask is not None and (not isinstance(self.mask, str) or not self.mask):
+            raise ConfigurationError("mask cannot be empty")
+
+
+@dataclass(frozen=True, slots=True)
+class HybridStage:
+    id: str
+    wordlist: Path
+    mask: str
+    direction: str
+    encoding: str = "utf-8"
+    type: str = field(default="hybrid", init=False)
+
+    def __post_init__(self) -> None:
+        _validate_stage_id(self.id)
+        if not isinstance(self.mask, str) or not self.mask:
+            raise ConfigurationError("hybrid mask cannot be empty")
+        if self.direction not in {"append", "prepend"}:
+            raise ConfigurationError("hybrid direction must be 'append' or 'prepend'")
+        if not isinstance(self.encoding, str) or not self.encoding:
+            raise ConfigurationError("hybrid encoding cannot be empty")
+
+
+@dataclass(frozen=True, slots=True)
+class BruteStage:
+    id: str
+    charset: str
+    min_length: int
+    max_length: int
+    type: str = field(default="brute", init=False)
+
+    def __post_init__(self) -> None:
+        _validate_stage_id(self.id)
+        BruteAttack(self.charset, self.min_length, self.max_length)
+
+
+AttackStage: TypeAlias = DictionaryStage | RulesStage | MaskStage | HybridStage | BruteStage
+
+
+@dataclass(frozen=True, slots=True)
+class AttackPlan:
+    schema: int
+    name: str
+    stages: tuple[AttackStage, ...]
+
+    def __post_init__(self) -> None:
+        if isinstance(self.schema, bool) or not isinstance(self.schema, int) or self.schema != 1:
+            raise ConfigurationError("plan schema must be 1")
+        if not isinstance(self.name, str) or not self.name:
+            raise ConfigurationError("plan name must be a non-empty string")
+        if not isinstance(self.stages, tuple) or not self.stages:
+            raise ConfigurationError("plan stages must be a non-empty tuple")
+        ids = tuple(stage.id for stage in self.stages)
+        if len(set(ids)) != len(ids):
+            raise ConfigurationError("plan stage IDs must be unique")
+
+
+@dataclass(frozen=True, slots=True)
+class CompiledStage:
+    id: str
+    attack: AttackSpec
+    keyspace: int
+    cpu_compatible: bool
+    source: AttackStage
+
+    def __post_init__(self) -> None:
+        _validate_stage_id(self.id)
+        if (
+            isinstance(self.keyspace, bool)
+            or not isinstance(self.keyspace, int)
+            or self.keyspace < 0
+        ):
+            raise ConfigurationError("compiled keyspace must be a non-negative integer")
+
+
+@dataclass(frozen=True, slots=True)
+class CompiledPlan:
+    schema: int
+    name: str
+    stages: tuple[CompiledStage, ...]
+    fingerprint: str
+
+    def __post_init__(self) -> None:
+        if isinstance(self.schema, bool) or not isinstance(self.schema, int) or self.schema != 1:
+            raise ConfigurationError("compiled plan schema must be 1")
+        if not isinstance(self.name, str) or not self.name or not self.stages:
+            raise ConfigurationError("compiled plan must have a name and stages")
+        if _SHA256.fullmatch(self.fingerprint) is None:
+            raise ConfigurationError("compiled plan fingerprint must be a SHA-256 digest")
 
 
 @dataclass(frozen=True, slots=True)
