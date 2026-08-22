@@ -145,6 +145,23 @@ def test_session_save_rejects_nonfinite_json_values(tmp_path: Path) -> None:
     assert not (tmp_path / "sessions" / "nonfinite" / "summary.json").exists()
 
 
+def test_session_save_leaves_no_directory_after_nested_nonfinite_json_failure(
+    tmp_path: Path,
+) -> None:
+    fingerprint: dict[str, object] = {"metadata": {"rate": 1.0}}
+    summary = SessionSummary(name="nested-nonfinite", pdf_fingerprint=fingerprint)
+    metadata = fingerprint["metadata"]
+    assert isinstance(metadata, dict)
+    metadata["rate"] = float("nan")
+    store = SessionStore(tmp_path)
+
+    with pytest.raises(SessionMismatch):
+        store.save(summary)
+
+    assert not (tmp_path / "sessions" / "nested-nonfinite").exists()
+    assert store.list() == []
+
+
 def test_session_store_lists_names_in_deterministic_order(tmp_path: Path) -> None:
     store = SessionStore(tmp_path)
     store.save(_summary("zebra"))

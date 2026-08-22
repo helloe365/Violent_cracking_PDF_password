@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -87,18 +88,28 @@ def event_payload(event: RecoveryEvent) -> dict[str, object]:
 
 
 _SENSITIVE_KEYS = frozenset({"password", "pdf_hash", "extracted_hash"})
+_EVENT_FIELD = re.compile(r"^[a-z][a-z0-9_]*$")
 
 
 def _reject_sensitive_payload(value: object) -> None:
+    """Allow only machine fields, JSON primitives, and fixed enum labels."""
+    if isinstance(value, StrEnum):
+        return
     if isinstance(value, str):
         if "$pdf$" in value:
             raise ConfigurationError("event payload may not contain an extracted PDF hash")
+        raise ConfigurationError("event payload text must be a fixed StrEnum value")
     elif isinstance(value, Mapping):
         for key, nested in value.items():
-            normalized = key.casefold() if isinstance(key, str) else ""
-            if normalized in _SENSITIVE_KEYS or "hint" in normalized:
+            if not isinstance(key, str) or _EVENT_FIELD.fullmatch(key) is None:
+                raise ConfigurationError(
+                    "event payload fields must be lowercase machine identifiers"
+                )
+            if key in _SENSITIVE_KEYS:
                 raise ConfigurationError(f"event payload may not contain '{key}'")
             _reject_sensitive_payload(nested)
     elif isinstance(value, (list, tuple)):
         for nested in value:
             _reject_sensitive_payload(nested)
+    elif value is not None and not isinstance(value, (bool, int, float)):
+        raise ConfigurationError("event payload values must be JSON primitives or fixed enums")

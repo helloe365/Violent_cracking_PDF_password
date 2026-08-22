@@ -49,6 +49,7 @@ class SessionStore:
 
     def save(self, summary: SessionSummary) -> None:
         summary.validate()
+        serialized = _serialize_summary(_summary_payload(summary))
         session_dir, summary_path, _ = self._paths(summary.name)
         self._assert_safe_target(session_dir)
         self._assert_safe_target(summary_path)
@@ -60,7 +61,7 @@ class SessionStore:
             ) from exc
         self._assert_safe_target(session_dir)
         self._assert_safe_target(summary_path)
-        _atomic_write(summary_path, _summary_payload(summary))
+        _atomic_write(summary_path, serialized)
 
     def load(self, name: str) -> SessionSummary:
         _, summary_path, _ = self._paths(name)
@@ -268,7 +269,20 @@ def _summary_from_payload(payload: object) -> SessionSummary:
     )
 
 
-def _atomic_write(path: Path, payload: Mapping[str, object]) -> None:
+def _serialize_summary(payload: Mapping[str, object]) -> str:
+    try:
+        return json.dumps(
+            payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+    except (TypeError, ValueError) as exc:
+        raise SessionMismatch(f"cannot serialize session summary: {exc}") from exc
+
+
+def _atomic_write(path: Path, serialized: str) -> None:
     try:
         descriptor, temporary_name = tempfile.mkstemp(
             prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
@@ -278,20 +292,13 @@ def _atomic_write(path: Path, payload: Mapping[str, object]) -> None:
     temporary = Path(temporary_name)
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as stream:
-            json.dump(
-                payload,
-                stream,
-                ensure_ascii=False,
-                sort_keys=True,
-                separators=(",", ":"),
-                allow_nan=False,
-            )
+            stream.write(serialized)
             stream.write("\n")
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, path)
         _fsync_directory(path.parent)
-    except (OSError, TypeError, ValueError) as exc:
+    except OSError as exc:
         raise SessionMismatch(f"cannot save session summary '{path}': {exc}") from exc
     finally:
         with suppress(OSError):

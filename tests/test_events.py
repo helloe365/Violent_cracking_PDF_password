@@ -2,12 +2,17 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta
+from enum import StrEnum
 from io import StringIO
 
 import pytest
 
 from pdf_password_recovery import EventType, JsonLineSink, RecoveryEvent, event_payload
 from pdf_password_recovery.errors import CapabilityError, ConfigurationError, PlanSchemaError
+
+
+class _FixedStatus(StrEnum):
+    READY = "准备"
 
 
 def test_json_line_sink_writes_the_schema_one_event_contract() -> None:
@@ -45,7 +50,7 @@ def test_event_defaults_to_a_utc_schema_one_timestamp() -> None:
     ).utcoffset() == timedelta(0)
 
 
-def test_json_line_sink_preserves_unicode_characters() -> None:
+def test_json_line_sink_preserves_fixed_enum_unicode_characters() -> None:
     stream = StringIO()
 
     JsonLineSink(stream).emit(
@@ -53,11 +58,11 @@ def test_json_line_sink_preserves_unicode_characters() -> None:
             type=EventType.WARNING,
             timestamp="2026-08-22T12:34:56Z",
             session=None,
-            payload={"message": "密码提示：北京"},
+            payload={"status": _FixedStatus.READY},
         )
     )
 
-    assert '"message":"密码提示：北京"' in stream.getvalue()
+    assert '"status":"准备"' in stream.getvalue()
     assert "\\u" not in stream.getvalue()
 
 
@@ -79,7 +84,7 @@ def test_event_rejects_sensitive_keys_at_any_nested_mapping_depth(
 
 
 def test_event_payload_rechecks_mutated_nested_payloads() -> None:
-    payload: dict[str, object] = {"stage": {"id": "dictionary"}}
+    payload: dict[str, object] = {"stage": {"id": EventType.STAGE_STARTED}}
     event = RecoveryEvent(type=EventType.CHECKPOINT, payload=payload)
     nested = payload["stage"]
     assert isinstance(nested, dict)
@@ -89,6 +94,36 @@ def test_event_payload_rechecks_mutated_nested_payloads() -> None:
         event_payload(event)
 
     assert raised.value.code == "configuration"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"message": "Password hint: autumn"},
+        {"message": "密码提示：北京"},
+        {"context": [{"text": "private prompt"}]},
+    ],
+)
+def test_event_rejects_free_text_at_any_nested_depth(payload: dict[str, object]) -> None:
+    with pytest.raises(ConfigurationError):
+        RecoveryEvent(type=EventType.WARNING, payload=payload)
+
+
+def test_event_allows_hint_counts_and_fixed_enum_statuses() -> None:
+    event = RecoveryEvent(
+        type=EventType.PROGRESS,
+        payload={
+            "hint_count": 2,
+            "status": _FixedStatus.READY,
+            "nested": [{"completed": 4, "kind": EventType.PROGRESS}],
+        },
+    )
+
+    assert event_payload(event)["payload"] == {
+        "hint_count": 2,
+        "status": _FixedStatus.READY,
+        "nested": [{"completed": 4, "kind": EventType.PROGRESS}],
+    }
 
 
 @pytest.mark.parametrize(
