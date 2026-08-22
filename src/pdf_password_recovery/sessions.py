@@ -48,6 +48,7 @@ class SessionStore:
         self.root = Path(root)
 
     def save(self, summary: SessionSummary) -> None:
+        summary.validate()
         session_dir, summary_path, _ = self._paths(summary.name)
         self._assert_safe_target(session_dir)
         self._assert_safe_target(summary_path)
@@ -277,7 +278,14 @@ def _atomic_write(path: Path, payload: Mapping[str, object]) -> None:
     temporary = Path(temporary_name)
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as stream:
-            json.dump(payload, stream, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            json.dump(
+                payload,
+                stream,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            )
             stream.write("\n")
             stream.flush()
             os.fsync(stream.fileno())

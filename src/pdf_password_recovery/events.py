@@ -61,9 +61,16 @@ class JsonLineSink:
     stream: TextIO
 
     def emit(self, event: RecoveryEvent) -> None:
-        self.stream.write(
-            json.dumps(event_payload(event), ensure_ascii=False, separators=(",", ":")) + "\n"
-        )
+        try:
+            line = json.dumps(
+                event_payload(event),
+                ensure_ascii=False,
+                separators=(",", ":"),
+                allow_nan=False,
+            )
+        except (TypeError, ValueError) as exc:
+            raise ConfigurationError("event payload is not valid JSON") from exc
+        self.stream.write(line + "\n")
         self.stream.flush()
 
 
@@ -83,9 +90,13 @@ _SENSITIVE_KEYS = frozenset({"password", "pdf_hash", "extracted_hash"})
 
 
 def _reject_sensitive_payload(value: object) -> None:
-    if isinstance(value, Mapping):
+    if isinstance(value, str):
+        if "$pdf$" in value:
+            raise ConfigurationError("event payload may not contain an extracted PDF hash")
+    elif isinstance(value, Mapping):
         for key, nested in value.items():
-            if isinstance(key, str) and key in _SENSITIVE_KEYS:
+            normalized = key.casefold() if isinstance(key, str) else ""
+            if normalized in _SENSITIVE_KEYS or "hint" in normalized:
                 raise ConfigurationError(f"event payload may not contain '{key}'")
             _reject_sensitive_payload(nested)
     elif isinstance(value, (list, tuple)):

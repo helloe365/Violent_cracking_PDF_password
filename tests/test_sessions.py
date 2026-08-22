@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import multiprocessing
 import os
 from pathlib import Path
 
@@ -8,6 +9,13 @@ import pytest
 
 from pdf_password_recovery import SessionStatus, SessionStore, SessionSummary
 from pdf_password_recovery.errors import ActiveSession, ConfigurationError, SessionMismatch
+
+
+def _hold_session_lock(root: str, name: str, acquired: object, release: object) -> None:
+    store = SessionStore(Path(root))
+    with store.lock(name):
+        acquired.set()
+        release.wait(10)
 
 
 def _summary(
@@ -71,6 +79,11 @@ def test_session_summary_rejects_negative_progress_values(
         SessionSummary(name="invalid", **overrides)
 
 
+def test_session_summary_rejects_a_non_string_backend() -> None:
+    with pytest.raises(ConfigurationError):
+        SessionSummary(name="invalid-backend", backend=1)  # type: ignore[arg-type]
+
+
 @pytest.mark.parametrize(
     "fingerprint",
     [
@@ -97,6 +110,39 @@ def test_session_store_round_trips_summary_and_atomically_replaces_it(tmp_path: 
     assert store.load("run-1") == replacement
     assert json.loads(summary_path.read_text(encoding="utf-8"))["completed"] == 57
     assert list(summary_path.parent.glob("*.tmp")) == []
+
+
+@pytest.mark.parametrize(
+    "key,value",
+    [
+        ("token", "$pdf$5*5*example"),
+        ("hints_content", "a private clue"),
+    ],
+)
+def test_session_save_rejects_sensitive_data_mutated_after_construction(
+    tmp_path: Path,
+    key: str,
+    value: str,
+) -> None:
+    fingerprint: dict[str, object] = {"size": 42, "sha256": "a" * 64}
+    summary = SessionSummary(name="mutated", pdf_fingerprint=fingerprint)
+    fingerprint[key] = value
+
+    with pytest.raises(ConfigurationError):
+        SessionStore(tmp_path).save(summary)
+
+    assert not (tmp_path / "sessions" / "mutated" / "summary.json").exists()
+
+
+def test_session_save_rejects_nonfinite_json_values(tmp_path: Path) -> None:
+    fingerprint: dict[str, object] = {"size": 42, "sha256": "a" * 64}
+    summary = SessionSummary(name="nonfinite", pdf_fingerprint=fingerprint)
+    fingerprint["rate"] = float("inf")
+
+    with pytest.raises(SessionMismatch):
+        SessionStore(tmp_path).save(summary)
+
+    assert not (tmp_path / "sessions" / "nonfinite" / "summary.json").exists()
 
 
 def test_session_store_lists_names_in_deterministic_order(tmp_path: Path) -> None:
@@ -209,3 +255,32 @@ def test_active_lock_prevents_a_second_lock_and_delete_then_release_allows_delet
     store.delete("active")
 
     assert not (tmp_path / "sessions" / "active").exists()
+
+
+def test_second_process_cannot_lock_or_delete_a_held_session(tmp_path: Path) -> None:
+    store = SessionStore(tmp_path)
+    store.save(_summary("cross-process"))
+    context = multiprocessing.get_context("spawn")
+    acquired = context.Event()
+    release = context.Event()
+    process = context.Process(
+        target=_hold_session_lock,
+        args=(str(tmp_path), "cross-process", acquired, release),
+    )
+    process.start()
+    try:
+        assert acquired.wait(timeout=10)
+        with pytest.raises(ActiveSession):
+            with store.lock("cross-process"):
+                pass
+        with pytest.raises(ActiveSession):
+            store.delete("cross-process")
+    finally:
+        release.set()
+        process.join(timeout=10)
+        if process.is_alive():
+            process.terminate()
+            process.join(timeout=10)
+
+    assert process.exitcode == 0
+    store.delete("cross-process")

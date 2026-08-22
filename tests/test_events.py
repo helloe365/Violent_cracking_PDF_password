@@ -91,6 +91,40 @@ def test_event_payload_rechecks_mutated_nested_payloads() -> None:
     assert raised.value.code == "configuration"
 
 
+@pytest.mark.parametrize(
+    "key,value",
+    [
+        ("token", "$pdf$5*5*example"),
+        ("hints_content", "a private clue"),
+    ],
+)
+def test_json_line_sink_rejects_sensitive_data_mutated_after_event_construction(
+    key: str,
+    value: str,
+) -> None:
+    payload: dict[str, object] = {"nested": []}
+    event = RecoveryEvent(type=EventType.ERROR, payload=payload)
+    nested = payload["nested"]
+    assert isinstance(nested, list)
+    nested.append({key: value})
+    stream = StringIO()
+
+    with pytest.raises(ConfigurationError):
+        JsonLineSink(stream).emit(event)
+
+    assert stream.getvalue() == ""
+
+
+def test_json_line_sink_rejects_nonfinite_json_values() -> None:
+    event = RecoveryEvent(type=EventType.PROGRESS, payload={"rate": float("nan")})
+    stream = StringIO()
+
+    with pytest.raises(ConfigurationError):
+        JsonLineSink(stream).emit(event)
+
+    assert stream.getvalue() == ""
+
+
 def test_event_schema_is_fixed_at_one() -> None:
     with pytest.raises(ConfigurationError):
         RecoveryEvent(type=EventType.RESULT, payload={}, schema=2)

@@ -180,6 +180,9 @@ class SessionSummary:
     updated_at: str = field(default_factory=_utc_timestamp)
 
     def __post_init__(self) -> None:
+        self.validate()
+
+    def validate(self) -> None:
         if not isinstance(self.name, str) or not _SESSION_NAME.fullmatch(self.name):
             raise ConfigurationError(
                 "session name may contain only letters, digits, '.', '_' and '-'"
@@ -198,6 +201,8 @@ class SessionSummary:
             raise ConfigurationError("plan fingerprint must be a string")
         if self.stage_id is not None and not isinstance(self.stage_id, str):
             raise ConfigurationError("stage ID must be a string or null")
+        if not isinstance(self.backend, str):
+            raise ConfigurationError("backend must be a string")
         for field_name in ("stage_index", "stage_count", "completed", "total"):
             _require_non_negative_int(field_name, getattr(self, field_name))
         if isinstance(self.elapsed_seconds, bool) or not isinstance(
