@@ -26,6 +26,16 @@ class BackendChoice(StrEnum):
     CPU = "cpu"
 
 
+class WorkloadProfile(StrEnum):
+    QUIET = "quiet"
+    BALANCED = "balanced"
+    FAST = "fast"
+
+    @property
+    def hashcat_value(self) -> str:
+        return {self.QUIET: "1", self.BALANCED: "2", self.FAST: "3"}[self]
+
+
 class SessionStatus(StrEnum):
     PLANNED = "planned"
     RUNNING = "running"
@@ -308,12 +318,20 @@ class RecoveryConfig:
     resume: bool = False
     output: Path | None = None
     assume_yes: bool = False
+    workload: WorkloadProfile = WorkloadProfile.BALANCED
+    device: str = "auto"
 
     def __post_init__(self) -> None:
         if self.workers < 1:
             raise ConfigurationError("workers must be at least 1")
         if self.resume and not self.session:
             raise ConfigurationError("--resume requires --session")
+        try:
+            object.__setattr__(self, "workload", WorkloadProfile(self.workload))
+        except ValueError as exc:
+            raise ConfigurationError("workload must be quiet, balanced, or fast") from exc
+        if not isinstance(self.device, str) or not self.device:
+            raise ConfigurationError("device selection cannot be empty")
 
 
 @dataclass(frozen=True, slots=True)

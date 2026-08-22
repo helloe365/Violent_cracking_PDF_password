@@ -26,9 +26,11 @@ from pdf_password_recovery.errors import (
 from pdf_password_recovery.models import (
     BruteAttack,
     DictionaryAttack,
+    HybridAttack,
     MaskAttack,
     Progress,
     RecoveryConfig,
+    RulesAttack,
 )
 
 _SMART_RULE_PATH = Path(__file__).resolve().parents[1] / "data" / "smart.rule"
@@ -258,24 +260,10 @@ def verify_gpu_device(
     toolchain: Toolchain,
     runner: Runner = subprocess.run,
 ) -> tuple[str, ...]:
-    args = (*toolchain.hashcat, "-I")
-    result = _run_preflight(runner, args)
-    inventory = f"{result.stdout}\n{result.stderr}"
-    if result.returncode != 0 or GPU_DEVICE_PATTERN.search(inventory) is None:
-        raise ToolIncompatible("hashcat found no usable GPU device")
-    selected: list[str] = []
-    covered_ids: set[str] = set()
-    for match in BACKEND_DEVICE_PATTERN.finditer(inventory):
-        device_id, alias, details = match.groups()
-        normalized_id = str(int(device_id))
-        normalized_alias = str(int(alias)) if alias else None
-        if normalized_id in covered_ids or not UNIFIED_MEMORY_PATTERN.search(details):
-            continue
-        selected.append(normalized_id)
-        covered_ids.add(normalized_id)
-        if normalized_alias is not None:
-            covered_ids.add(normalized_alias)
-    return tuple(selected)
+    from .hashcat_info import inspect_hashcat, select_devices
+
+    capabilities = inspect_hashcat(toolchain, runner)
+    return tuple(device.id for device in select_devices(capabilities, "auto"))
 
 
 def _parse_hashcat_status(line: str, elapsed: float) -> Progress | None:
@@ -327,6 +315,7 @@ def _common_args(
     attack_mode: int,
     paths: SessionPaths,
     device_ids: Sequence[str] = (),
+    workload: str = "2",
 ) -> list[str]:
     args = [
         *toolchain.hashcat,
@@ -341,6 +330,8 @@ def _common_args(
         args.extend(("-d", ",".join(device_ids)))
     args.extend(
         [
+            "-w",
+            workload,
             "--status",
             "--status-json",
             "--status-timer",
@@ -403,6 +394,8 @@ def build_hashcat_args(
             args.extend(("-d", ",".join(device_ids)))
         args.extend(
             [
+                "-w",
+                config.workload.hashcat_value,
                 "--status",
                 "--status-json",
                 "--status-timer",
@@ -419,14 +412,17 @@ def build_hashcat_args(
     value = pdf_hash.value if isinstance(pdf_hash, ExtractedHash) else pdf_hash
     attack = config.attack
     if isinstance(attack, DictionaryAttack):
-        args = _common_args(toolchain, mode, 0, paths, device_ids)
+        args = _common_args(toolchain, mode, 0, paths, device_ids, config.workload.hashcat_value)
         if attack.min_length is not None:
             args.extend(("-j", _hashcat_length_rule(attack.min_length, attack.max_length)))
         if attack.apply_rules:
             args.extend(("-r", str(_SMART_RULE_PATH)))
         args.extend((value, str(attack.wordlist.resolve())))
+    elif isinstance(attack, RulesAttack):
+        args = _common_args(toolchain, mode, 0, paths, device_ids, config.workload.hashcat_value)
+        args.extend((value, str(attack.wordlist.resolve())))
     elif isinstance(attack, MaskAttack):
-        args = _common_args(toolchain, mode, 3, paths, device_ids)
+        args = _common_args(toolchain, mode, 3, paths, device_ids, config.workload.hashcat_value)
         if len(attack.custom_charsets) > 4:
             raise ToolIncompatible("hashcat supports at most four custom charsets")
         for index, charset in enumerate(attack.custom_charsets, start=1):
@@ -434,7 +430,7 @@ def build_hashcat_args(
         args.extend((value, attack.mask))
     elif isinstance(attack, BruteAttack):
         charset = _brute_charset(attack.charset)
-        args = _common_args(toolchain, mode, 3, paths, device_ids)
+        args = _common_args(toolchain, mode, 3, paths, device_ids, config.workload.hashcat_value)
         args.extend(
             (
                 "--increment",
@@ -448,6 +444,15 @@ def build_hashcat_args(
                 "?1" * attack.max_length,
             )
         )
+    elif isinstance(attack, HybridAttack):
+        attack_mode = 6 if attack.direction == "append" else 7
+        args = _common_args(
+            toolchain, mode, attack_mode, paths, device_ids, config.workload.hashcat_value
+        )
+        if attack.direction == "append":
+            args.extend((value, str(attack.wordlist.resolve()), attack.mask))
+        else:
+            args.extend((value, attack.mask, str(attack.wordlist.resolve())))
     else:  # pragma: no cover - RecoveryConfig constrains the union
         raise ToolIncompatible(f"unsupported hashcat attack: {type(attack).__name__}")
     return tuple(args)
@@ -491,7 +496,10 @@ def run_hashcat(
     tools = toolchain or discover_toolchain()
     device_ids: tuple[str, ...] = ()
     if runner is subprocess.run:
-        device_ids = verify_gpu_device(tools, runner)
+        from .hashcat_info import inspect_hashcat, select_devices
+
+        capabilities = inspect_hashcat(tools, runner)
+        device_ids = tuple(device.id for device in select_devices(capabilities, config.device))
     session_paths = paths or SessionPaths.for_run(config.session)
     session_paths.outfile.unlink(missing_ok=True)
 
