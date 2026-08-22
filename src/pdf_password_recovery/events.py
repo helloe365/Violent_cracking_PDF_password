@@ -45,7 +45,7 @@ class RecoveryEvent:
     schema: int = 1
 
     def __post_init__(self) -> None:
-        if isinstance(self.schema, bool) or self.schema != 1:
+        if isinstance(self.schema, bool) or not isinstance(self.schema, int) or self.schema != 1:
             raise ConfigurationError("event schema must be 1")
         if not isinstance(self.type, EventType):
             raise ConfigurationError("event type must be an EventType")
@@ -105,7 +105,7 @@ _VERSION = re.compile(r"^[0-9]+(?:\.[0-9]+){1,3}(?:[-+][A-Za-z0-9._-]+)?$")
 _ARTIFACT_PART = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
 _BACKENDS = frozenset({"auto", "cpu", "hashcat"})
-_WORKLOADS = frozenset({"quiet", "balanced", "aggressive"})
+_WORKLOADS = frozenset({"quiet", "balanced", "fast"})
 _PREFLIGHT_STATUSES = frozenset({"ready", "unavailable"})
 _RESULT_STATUSES = frozenset({"found", "exhausted", "interrupted", "failed"})
 _CHECKPOINT_STATUSES = frozenset({"saved", "cleared"})
@@ -117,7 +117,7 @@ def _validate_payload(event_type: EventType, payload: Mapping[str, object]) -> N
     for key, value in payload.items():
         validator = validators.get(key)
         if validator is None:
-            raise ConfigurationError(f"'{key}' is not allowed in {event_type.value} events")
+            raise ConfigurationError("event payload contains an unsupported field")
         validator(value)
 
 

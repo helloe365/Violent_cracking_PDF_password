@@ -151,7 +151,12 @@ class RecoveryOutcome:
 
 
 _SESSION_NAME = re.compile(r"^[A-Za-z0-9._-]+$")
-_SUMMARY_SENSITIVE_KEYS = frozenset({"password", "pdf_hash", "extracted_hash", "hints"})
+_SAFE_IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+_VERSION = re.compile(r"^[0-9]+(?:\.[0-9]+){1,3}(?:[-+][A-Za-z0-9._-]+)?$")
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
+_SUMMARY_BACKENDS = frozenset({"", "auto", "cpu", "hashcat"})
+_SUMMARY_WORKLOADS = frozenset({"quiet", "balanced", "fast"})
+_FINGERPRINT_FIELDS = frozenset({"size", "mtime_ns", "sha256"})
 
 
 def _utc_timestamp() -> str:
@@ -189,20 +194,17 @@ class SessionSummary:
             )
         if self.name in {".", ".."}:
             raise ConfigurationError("session name may not be '.' or '..'")
-        if isinstance(self.schema, bool) or self.schema != 1:
+        if isinstance(self.schema, bool) or not isinstance(self.schema, int) or self.schema != 1:
             raise ConfigurationError("session schema must be 1")
         if not isinstance(self.status, SessionStatus):
             raise ConfigurationError("session status must be a SessionStatus")
-        if not isinstance(self.pdf_display_name, str):
-            raise ConfigurationError("PDF display name must be a string")
-        if not isinstance(self.pdf_fingerprint, Mapping):
-            raise ConfigurationError("PDF fingerprint must be a mapping")
-        if not isinstance(self.plan_fingerprint, str):
-            raise ConfigurationError("plan fingerprint must be a string")
-        if self.stage_id is not None and not isinstance(self.stage_id, str):
-            raise ConfigurationError("stage ID must be a string or null")
-        if not isinstance(self.backend, str):
-            raise ConfigurationError("backend must be a string")
+        _validate_optional_identifier(self.pdf_display_name, "PDF display name")
+        _validate_pdf_fingerprint(self.pdf_fingerprint)
+        _validate_optional_sha256(self.plan_fingerprint, "plan fingerprint")
+        if self.stage_id is not None:
+            _validate_optional_identifier(self.stage_id, "stage ID")
+        if not isinstance(self.backend, str) or self.backend not in _SUMMARY_BACKENDS:
+            raise ConfigurationError("backend must be an allowed backend")
         for field_name in ("stage_index", "stage_count", "completed", "total"):
             _require_non_negative_int(field_name, getattr(self, field_name))
         if isinstance(self.elapsed_seconds, bool) or not isinstance(
@@ -211,25 +213,16 @@ class SessionSummary:
             raise ConfigurationError("elapsed seconds must be a number")
         if not math.isfinite(self.elapsed_seconds) or self.elapsed_seconds < 0:
             raise ConfigurationError("elapsed seconds cannot be negative")
-        if not isinstance(self.device_ids, tuple) or not all(
-            isinstance(device_id, str) for device_id in self.device_ids
+        if not isinstance(self.device_ids, tuple):
+            raise ConfigurationError("device IDs must be a tuple of safe identifiers")
+        for device_id in self.device_ids:
+            _validate_optional_identifier(device_id, "device ID")
+        if self.tool_version is not None and (
+            not isinstance(self.tool_version, str) or _VERSION.fullmatch(self.tool_version) is None
         ):
-            raise ConfigurationError("device IDs must be a tuple of strings")
-        if self.tool_version is not None and not isinstance(self.tool_version, str):
-            raise ConfigurationError("tool version must be a string or null")
-        if self.workload is not None and not isinstance(self.workload, str):
-            raise ConfigurationError("workload must be a string or null")
-        for value in (
-            self.pdf_display_name,
-            self.pdf_fingerprint,
-            self.plan_fingerprint,
-            self.stage_id,
-            self.backend,
-            self.device_ids,
-            self.tool_version,
-            self.workload,
-        ):
-            _reject_summary_sensitive_data(value)
+            raise ConfigurationError("tool version must be a version identifier or null")
+        if self.workload is not None and self.workload not in _SUMMARY_WORKLOADS:
+            raise ConfigurationError("workload must be an allowed workload or null")
         _validate_utc_timestamp(self.created_at, "created timestamp")
         _validate_utc_timestamp(self.updated_at, "updated timestamp")
 
@@ -252,16 +245,27 @@ def _validate_utc_timestamp(value: object, field_name: str) -> None:
         raise ConfigurationError(f"{field_name} must be UTC ISO-8601 ending in Z")
 
 
-def _reject_summary_sensitive_data(value: object) -> None:
-    if isinstance(value, str):
-        if "$pdf$" in value:
-            raise ConfigurationError("session summary may not contain an extracted PDF hash")
-    elif isinstance(value, Mapping):
-        for key, nested in value.items():
-            normalized = key.casefold() if isinstance(key, str) else ""
-            if normalized in _SUMMARY_SENSITIVE_KEYS or "hint" in normalized:
-                raise ConfigurationError(f"session summary may not contain '{key}'")
-            _reject_summary_sensitive_data(nested)
-    elif isinstance(value, (list, tuple)):
-        for nested in value:
-            _reject_summary_sensitive_data(nested)
+def _validate_optional_identifier(value: object, field_name: str) -> None:
+    if value == "":
+        return
+    if not isinstance(value, str) or _SAFE_IDENTIFIER.fullmatch(value) is None:
+        raise ConfigurationError(f"{field_name} must be a safe identifier")
+
+
+def _validate_optional_sha256(value: object, field_name: str) -> None:
+    if value == "":
+        return
+    if not isinstance(value, str) or _SHA256.fullmatch(value) is None:
+        raise ConfigurationError(f"{field_name} must be a SHA-256 digest")
+
+
+def _validate_pdf_fingerprint(value: object) -> None:
+    if not isinstance(value, Mapping) or not set(value).issubset(_FINGERPRINT_FIELDS):
+        raise ConfigurationError("PDF fingerprint has an invalid structure")
+    for key, nested in value.items():
+        if key in {"size", "mtime_ns"}:
+            _require_non_negative_int("PDF fingerprint value", nested)
+        elif key == "sha256":
+            _validate_optional_sha256(nested, "PDF fingerprint digest")
+        else:
+            raise ConfigurationError("PDF fingerprint has an invalid structure")

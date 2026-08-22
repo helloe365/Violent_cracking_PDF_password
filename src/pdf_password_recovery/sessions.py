@@ -56,9 +56,7 @@ class SessionStore:
         try:
             session_dir.mkdir(parents=True, exist_ok=True)
         except OSError as exc:
-            raise SessionMismatch(
-                f"cannot create session directory '{session_dir}': {exc}"
-            ) from exc
+            raise SessionMismatch("cannot create session directory") from exc
         self._assert_safe_target(session_dir)
         self._assert_safe_target(summary_path)
         _atomic_write(summary_path, serialized)
@@ -70,11 +68,11 @@ class SessionStore:
             with summary_path.open("r", encoding="utf-8") as stream:
                 payload = json.load(stream)
         except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-            raise SessionMismatch(f"cannot load session summary '{name}': {exc}") from exc
+            raise SessionMismatch("cannot load session summary") from exc
         try:
             summary = _summary_from_payload(payload)
         except (KeyError, TypeError, ValueError, ConfigurationError) as exc:
-            raise SessionMismatch(f"invalid session summary '{name}': {exc}") from exc
+            raise SessionMismatch("invalid session summary") from exc
         if summary.name != name:
             raise SessionMismatch("summary name does not match its session directory")
         return summary
@@ -91,15 +89,15 @@ class SessionStore:
         try:
             entries = sorted(sessions_root.iterdir(), key=lambda entry: entry.name)
         except OSError as exc:
-            raise SessionMismatch(f"cannot list sessions: {exc}") from exc
+            raise SessionMismatch("cannot list sessions") from exc
         for entry in entries:
             self._assert_safe_target(entry)
             if not entry.is_dir():
-                raise SessionMismatch(f"invalid session entry '{entry.name}'")
+                raise SessionMismatch("invalid session entry")
             try:
                 _validate_session_name(entry.name)
             except ConfigurationError as exc:
-                raise SessionMismatch(f"invalid session entry '{entry.name}'") from exc
+                raise SessionMismatch("invalid session entry") from exc
             summaries.append(self.load(entry.name))
         return summaries
 
@@ -109,13 +107,13 @@ class SessionStore:
         self._assert_safe_target(summary_path)
         self._assert_safe_target(lock_path)
         if not session_dir.is_dir():
-            raise SessionMismatch(f"session '{name}' does not exist")
+            raise SessionMismatch("session does not exist")
         self._assert_only_known_files(session_dir)
 
         try:
             stream = lock_path.open("a+b")
         except OSError as exc:
-            raise SessionMismatch(f"cannot inspect active session lock '{name}': {exc}") from exc
+            raise SessionMismatch("cannot inspect active session lock") from exc
         try:
             _acquire_lock(stream, name)
             try:
@@ -125,7 +123,7 @@ class SessionStore:
             finally:
                 _release_lock(stream)
         except OSError as exc:
-            raise SessionMismatch(f"cannot delete session summary '{name}': {exc}") from exc
+            raise SessionMismatch("cannot delete session summary") from exc
         finally:
             stream.close()
 
@@ -134,7 +132,7 @@ class SessionStore:
             lock_path.unlink(missing_ok=True)
             session_dir.rmdir()
         except OSError as exc:
-            raise SessionMismatch(f"cannot remove session '{name}': {exc}") from exc
+            raise SessionMismatch("cannot remove session") from exc
 
     def prune(self) -> list[str]:
         deleted: list[str] = []
@@ -154,7 +152,7 @@ class SessionStore:
             self._assert_safe_target(lock_path)
             stream = lock_path.open("a+b")
         except OSError as exc:
-            raise SessionMismatch(f"cannot create session lock '{name}': {exc}") from exc
+            raise SessionMismatch("cannot create session lock") from exc
         try:
             _acquire_lock(stream, name)
             try:
@@ -178,9 +176,7 @@ class SessionStore:
         try:
             entries = list(session_dir.iterdir())
         except OSError as exc:
-            raise SessionMismatch(
-                f"cannot inspect session directory '{session_dir}': {exc}"
-            ) from exc
+            raise SessionMismatch("cannot inspect session directory") from exc
         known = {_SUMMARY_FILE, _LOCK_FILE}
         if any(entry.name not in known for entry in entries):
             raise SessionMismatch("session directory contains unexpected files")
@@ -279,7 +275,7 @@ def _serialize_summary(payload: Mapping[str, object]) -> str:
             allow_nan=False,
         )
     except (TypeError, ValueError) as exc:
-        raise SessionMismatch(f"cannot serialize session summary: {exc}") from exc
+        raise SessionMismatch("cannot serialize session summary") from exc
 
 
 def _atomic_write(path: Path, serialized: str) -> None:
@@ -288,7 +284,7 @@ def _atomic_write(path: Path, serialized: str) -> None:
             prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
         )
     except OSError as exc:
-        raise SessionMismatch(f"cannot prepare session summary '{path}': {exc}") from exc
+        raise SessionMismatch("cannot prepare session summary") from exc
     temporary = Path(temporary_name)
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as stream:
@@ -299,7 +295,7 @@ def _atomic_write(path: Path, serialized: str) -> None:
         os.replace(temporary, path)
         _fsync_directory(path.parent)
     except OSError as exc:
-        raise SessionMismatch(f"cannot save session summary '{path}': {exc}") from exc
+        raise SessionMismatch("cannot save session summary") from exc
     finally:
         with suppress(OSError):
             temporary.unlink(missing_ok=True)
@@ -330,7 +326,7 @@ def _acquire_lock(stream: Any, name: str) -> None:
 
             fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError as exc:
-        raise ActiveSession(f"session '{name}' is active") from exc
+        raise ActiveSession("session is active") from exc
 
 
 def _release_lock(stream: Any) -> None:

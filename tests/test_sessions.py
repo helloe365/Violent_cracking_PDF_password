@@ -85,6 +85,45 @@ def test_session_summary_rejects_a_non_string_backend() -> None:
 
 
 @pytest.mark.parametrize(
+    "overrides",
+    [
+        {"pdf_fingerprint": {"note": "密码提示：北京"}},
+        {"pdf_fingerprint": {"sha256": "not-a-hash"}},
+        {"pdf_fingerprint": {"size": -1}},
+        {"pdf_display_name": "C:/private/hint.pdf"},
+        {"plan_fingerprint": "$pdf$5*5*example"},
+        {"stage_id": "private prompt"},
+        {"backend": "custom-backend"},
+        {"device_ids": ("密码",)},
+        {"tool_version": "version from hint"},
+        {"workload": "aggressive"},
+    ],
+)
+def test_session_summary_rejects_unstructured_or_unsafe_fields(
+    overrides: dict[str, object],
+) -> None:
+    with pytest.raises(ConfigurationError):
+        SessionSummary(name="private", **overrides)  # type: ignore[arg-type]
+
+
+def test_session_summary_rejection_does_not_echo_sensitive_fingerprint_key() -> None:
+    sensitive_key = "$pdf$5*5*example"
+
+    with pytest.raises(ConfigurationError) as raised:
+        SessionSummary(name="private", pdf_fingerprint={sensitive_key: "hint"})
+
+    assert sensitive_key not in str(raised.value)
+
+
+def test_session_summary_schema_is_an_int_one() -> None:
+    for schema in (2, 1.0, True):
+        with pytest.raises(ConfigurationError):
+            SessionSummary(name="schema", schema=schema)  # type: ignore[arg-type]
+
+    assert SessionSummary(name="schema", schema=1).schema == 1
+
+
+@pytest.mark.parametrize(
     "fingerprint",
     [
         {"value": "$pdf$5*5*example"},
@@ -134,12 +173,23 @@ def test_session_save_rejects_sensitive_data_mutated_after_construction(
     assert not (tmp_path / "sessions" / "mutated" / "summary.json").exists()
 
 
+def test_session_store_io_errors_do_not_echo_sensitive_paths(tmp_path: Path) -> None:
+    sensitive_root = tmp_path / "密码提示-$pdf$"
+    sensitive_root.write_text("not a directory", encoding="utf-8")
+
+    with pytest.raises(SessionMismatch) as raised:
+        SessionStore(sensitive_root).save(_summary("safe"))
+
+    assert str(sensitive_root) not in str(raised.value)
+    assert "$pdf$" not in str(raised.value)
+
+
 def test_session_save_rejects_nonfinite_json_values(tmp_path: Path) -> None:
     fingerprint: dict[str, object] = {"size": 42, "sha256": "a" * 64}
     summary = SessionSummary(name="nonfinite", pdf_fingerprint=fingerprint)
-    fingerprint["rate"] = float("inf")
+    fingerprint["size"] = float("inf")
 
-    with pytest.raises(SessionMismatch):
+    with pytest.raises(ConfigurationError):
         SessionStore(tmp_path).save(summary)
 
     assert not (tmp_path / "sessions" / "nonfinite" / "summary.json").exists()
@@ -148,14 +198,12 @@ def test_session_save_rejects_nonfinite_json_values(tmp_path: Path) -> None:
 def test_session_save_leaves_no_directory_after_nested_nonfinite_json_failure(
     tmp_path: Path,
 ) -> None:
-    fingerprint: dict[str, object] = {"metadata": {"rate": 1.0}}
+    fingerprint: dict[str, object] = {"size": 1}
     summary = SessionSummary(name="nested-nonfinite", pdf_fingerprint=fingerprint)
-    metadata = fingerprint["metadata"]
-    assert isinstance(metadata, dict)
-    metadata["rate"] = float("nan")
+    fingerprint["size"] = float("nan")
     store = SessionStore(tmp_path)
 
-    with pytest.raises(SessionMismatch):
+    with pytest.raises(ConfigurationError):
         store.save(summary)
 
     assert not (tmp_path / "sessions" / "nested-nonfinite").exists()

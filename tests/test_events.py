@@ -103,6 +103,15 @@ def test_event_payload_rechecks_mutated_nested_payloads() -> None:
     assert raised.value.code == "configuration"
 
 
+def test_event_rejection_does_not_echo_an_unknown_sensitive_field() -> None:
+    sensitive_key = "$pdf$5*5*example"
+
+    with pytest.raises(ConfigurationError) as raised:
+        RecoveryEvent(type=EventType.PREFLIGHT, payload={sensitive_key: 1})
+
+    assert sensitive_key not in str(raised.value)
+
+
 @pytest.mark.parametrize(
     "payload",
     [
@@ -276,8 +285,11 @@ def test_json_line_sink_rejects_nonfinite_json_values() -> None:
 
 
 def test_event_schema_is_fixed_at_one() -> None:
-    with pytest.raises(ConfigurationError):
-        RecoveryEvent(type=EventType.RESULT, payload={}, schema=2)
+    for schema in (2, 1.0, True):
+        with pytest.raises(ConfigurationError):
+            RecoveryEvent(type=EventType.RESULT, payload={}, schema=schema)  # type: ignore[arg-type]
+
+    assert RecoveryEvent(type=EventType.RESULT, payload={}, schema=1).schema == 1
 
 
 def test_event_type_values_are_stable() -> None:
