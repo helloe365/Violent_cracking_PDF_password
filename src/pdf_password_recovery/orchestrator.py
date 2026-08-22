@@ -11,12 +11,13 @@ from dataclasses import replace
 from pathlib import Path
 
 from .backends.hashcat_info import PreflightReport, run_preflight
-from .errors import RecoveryError, ToolUnavailable
+from .errors import ConfigurationError, RecoveryError, ToolUnavailable
 from .events import EventMessage, EventSink, EventType, RecoveryEvent
 from .models import (
     BackendChoice,
     CompiledPlan,
     CompiledStage,
+    MaskAttack,
     OutcomeStatus,
     Progress,
     RecoveryConfig,
@@ -66,6 +67,10 @@ def _safe_ascii_slug(value: str, fallback: str, limit: int) -> str:
 
 def _event_backend(value: str, fallback: str = "auto") -> str:
     return value if value in {"auto", "cpu", "hashcat"} else fallback
+
+
+def _hashcat_compatible(stage: CompiledStage) -> bool:
+    return not (isinstance(stage.attack, MaskAttack) and len(stage.attack.custom_charsets) > 4)
 
 
 def _artifact_name(value: Path) -> str:
@@ -165,7 +170,14 @@ def run_plan(
         with lock:
             if session:
                 store.save(_summary(session, Path(pdf_path), compiled_plan, workload, backend))
-            may_use_hashcat = backend is not BackendChoice.CPU
+            if backend is BackendChoice.HASHCAT and any(
+                not _hashcat_compatible(stage) for stage in compiled_plan.stages
+            ):
+                raise ConfigurationError("hashcat supports at most four custom charsets")
+            may_use_hashcat = backend is not BackendChoice.CPU and (
+                backend is BackendChoice.HASHCAT
+                or any(_hashcat_compatible(stage) for stage in compiled_plan.stages)
+            )
             if may_use_hashcat:
                 try:
                     preflight = preflight_fn(
@@ -207,7 +219,9 @@ def run_plan(
                     raise ToolUnavailable(f"stage '{stage.id}' requires hashcat")
                 stage_backend_choice = (
                     BackendChoice.HASHCAT
-                    if backend is not BackendChoice.CPU and hashcat_ready
+                    if backend is not BackendChoice.CPU
+                    and hashcat_ready
+                    and _hashcat_compatible(stage)
                     else BackendChoice.CPU
                 )
                 stage_backend = stage_backend_choice.value

@@ -8,7 +8,13 @@ import pytest
 from pdf_password_recovery.assets import bundled_wordlist
 from pdf_password_recovery.candidates import SMART_RULES
 from pdf_password_recovery.errors import ConfigurationError, PlanSchemaError
-from pdf_password_recovery.models import BackendChoice, DictionaryStage, MaskStage, RulesStage
+from pdf_password_recovery.models import (
+    AttackPlan,
+    BackendChoice,
+    DictionaryStage,
+    MaskStage,
+    RulesStage,
+)
 from pdf_password_recovery.plans import built_in_plan, compile_plan, load_plan
 
 
@@ -152,6 +158,29 @@ def test_profiles_skip_fixed_masks_outside_user_bounds(tmp_path: Path) -> None:
     mask_ids = {stage.id for stage in plan.stages if stage.type == "mask"}
     assert "pin6" in mask_ids
     assert not {"pin4", "pin8", "lower-mask", "upper-mask"} & mask_ids
+
+
+def test_profile_bounds_filter_each_common_hcmask_entry(tmp_path: Path) -> None:
+    plan = AttackPlan(
+        1,
+        "bounded-common",
+        (
+            MaskStage(
+                "common",
+                mask_file=Path(__file__).parents[1]
+                / "src"
+                / "pdf_password_recovery"
+                / "data"
+                / "common.hcmask",
+                min_length=5,
+                max_length=7,
+            ),
+        ),
+    )
+
+    compiled = compile_plan(plan, base_dir=tmp_path, backend=BackendChoice.CPU)
+
+    assert [len(stage.attack.mask) // 2 for stage in compiled.stages] == [6]
 
 
 def test_compile_plan_marks_external_rules_hashcat_required_and_cpu_refuses_them(

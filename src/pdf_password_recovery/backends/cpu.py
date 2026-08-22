@@ -366,7 +366,7 @@ def _worker_main(pdf_path: str, attack, task_queue, result_queue, stop_event) ->
 
 
 def _candidate_space(attack):
-    if isinstance(attack, DictionaryAttack):
+    if isinstance(attack, (DictionaryAttack, RulesAttack)):
         return None
     if isinstance(attack, MaskAttack):
         return MaskSpace.compile(attack.mask, attack.custom_charsets)

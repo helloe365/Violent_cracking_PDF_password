@@ -140,8 +140,8 @@ def compile_mask(mask: str, custom_charsets: tuple[str, ...] = ()) -> tuple[str,
     if not mask:
         raise MaskSyntaxError("mask cannot be empty")
 
-    if not isinstance(custom_charsets, tuple) or len(custom_charsets) > 4:
-        raise MaskSyntaxError("mask supports at most four custom charsets")
+    if not isinstance(custom_charsets, tuple) or len(custom_charsets) > 8:
+        raise MaskSyntaxError("mask supports at most eight custom charsets")
     if any(not isinstance(charset, str) or not charset for charset in custom_charsets):
         raise MaskSyntaxError("custom charsets cannot be empty")
 

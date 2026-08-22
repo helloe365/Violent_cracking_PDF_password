@@ -51,8 +51,8 @@ def parse_hcmask(path: Path) -> tuple[HcmaskEntry, ...]:
         fields = line.split(",")
         mask = fields[-1]
         custom = tuple(fields[:-1])
-        if len(custom) > 4:
-            _mask_error(path, line_number, "mask supports at most four custom charsets")
+        if len(custom) > 8:
+            _mask_error(path, line_number, "mask supports at most eight custom charsets")
         if not mask or any(not value for value in custom):
             _mask_error(path, line_number, "invalid custom charset or missing mask")
         try:
@@ -248,9 +248,21 @@ def _compile_stage(source, base_dir: Path, backend: BackendChoice) -> list[Compi
     if isinstance(source, MaskStage):
         if source.mask_file is None:
             attack = MaskAttack(source.mask or "")
-            keyspace = MaskSpace.compile(attack.mask).total
+            space = MaskSpace.compile(attack.mask)
+            if not _mask_length_in_bounds(len(space.positions), source):
+                raise ConfigurationError(f"mask stage '{source.id}' is outside its length bounds")
+            keyspace = space.total
             return [_compiled(source.id, attack, keyspace, True, source, backend)]
         entries = parse_hcmask(_input_path(source.mask_file, base_dir))
+        filtered = [
+            entry
+            for entry in entries
+            if _mask_length_in_bounds(
+                len(MaskSpace.compile(entry.mask, entry.custom_charsets).positions), source
+            )
+        ]
+        if not filtered:
+            raise ConfigurationError(f"mask file stage '{source.id}' has no entries in bounds")
         return [
             _compiled(
                 f"{source.id}:{entry.line_number}",
@@ -260,7 +272,7 @@ def _compile_stage(source, base_dir: Path, backend: BackendChoice) -> list[Compi
                 source,
                 backend,
             )
-            for entry in entries
+            for entry in filtered
         ]
     if isinstance(source, HybridStage):
         path = _input_path(source.wordlist, base_dir)
@@ -340,7 +352,16 @@ def _stage_fingerprint(compiled: CompiledStage) -> dict[str, Any]:
         )
     if isinstance(compiled.source, MaskStage) and compiled.source.mask_file is not None:
         data["mask_file"] = _file_fingerprint(compiled.source.mask_file)
+    if isinstance(compiled.source, MaskStage):
+        data.update(
+            min_length=compiled.source.min_length,
+            max_length=compiled.source.max_length,
+        )
     return data
+
+
+def _mask_length_in_bounds(length: int, stage: MaskStage) -> bool:
+    return stage.min_length is None or stage.min_length <= length <= stage.max_length
 
 
 def built_in_plan(
@@ -373,7 +394,12 @@ def built_in_plan(
             ),
         )
         stages.append(
-            MaskStage("common-masks", mask_file=Path(__file__).with_name("data") / "common.hcmask")
+            MaskStage(
+                "common-masks",
+                mask_file=Path(__file__).with_name("data") / "common.hcmask",
+                min_length=min_length,
+                max_length=max_length,
+            )
         )
         if hints_file is not None:
             hints = Path(hints_file).resolve()

@@ -108,8 +108,8 @@ class MaskAttack:
     custom_charsets: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        if not isinstance(self.custom_charsets, tuple) or len(self.custom_charsets) > 4:
-            raise ConfigurationError("mask supports at most four custom charsets")
+        if not isinstance(self.custom_charsets, tuple) or len(self.custom_charsets) > 8:
+            raise ConfigurationError("mask supports at most eight custom charsets")
         if any(not isinstance(charset, str) or not charset for charset in self.custom_charsets):
             raise ConfigurationError("custom charsets cannot be empty")
 
@@ -211,6 +211,8 @@ class MaskStage:
     id: str
     mask: str | None = None
     mask_file: Path | None = None
+    min_length: int | None = None
+    max_length: int | None = None
     type: str = field(default="mask", init=False)
 
     def __post_init__(self) -> None:
@@ -219,6 +221,7 @@ class MaskStage:
             raise ConfigurationError("mask stage requires exactly one of mask or mask_file")
         if self.mask is not None and (not isinstance(self.mask, str) or not self.mask):
             raise ConfigurationError("mask cannot be empty")
+        _validate_dictionary_bounds(self.min_length, self.max_length)
 
 
 @dataclass(frozen=True, slots=True)

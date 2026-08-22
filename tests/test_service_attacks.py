@@ -3,10 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from pypdf import PdfWriter
 
 from pdf_password_recovery import BackendChoice, HybridAttack, RecoveryConfig, RulesAttack
 from pdf_password_recovery.errors import ConfigurationError
 from pdf_password_recovery.models import Cursor, CursorKind, OutcomeStatus, RecoveryOutcome
+from pdf_password_recovery.backends.cpu import run_cpu
 from pdf_password_recovery.service import (
     _hashcat_manifest_payload,
     _preflight,
@@ -36,6 +38,25 @@ def test_cpu_accepts_supported_rules_and_hybrid(tmp_path, monkeypatch):
     for attack in (RulesAttack(words, ("c",)), HybridAttack(words, "?d", "append")):
         config = RecoveryConfig(Path("input.pdf"), attack, backend=BackendChoice.CPU)
         assert _run_cpu_with_checkpoint(config, None).status is OutcomeStatus.EXHAUSTED
+
+
+def test_cpu_rules_worker_builds_rule_candidates_and_finds_password(tmp_path):
+    pdf = tmp_path / "protected.pdf"
+    writer = PdfWriter()
+    writer.add_blank_page(72, 72)
+    writer.encrypt("Ab")
+    with pdf.open("wb") as stream:
+        writer.write(stream)
+    words = tmp_path / "words.txt"
+    words.write_text("ab\n", encoding="utf-8")
+
+    outcome = run_cpu(
+        RecoveryConfig(pdf, RulesAttack(words, ("c",)), backend=BackendChoice.CPU)
+    )
+
+    assert outcome.status is OutcomeStatus.FOUND
+    assert outcome.password == "Ab"
+    assert outcome.attempted == 1
 
 
 def test_cpu_rejects_unsupported_rules_before_running(tmp_path, monkeypatch):

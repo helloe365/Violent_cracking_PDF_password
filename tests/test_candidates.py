@@ -32,9 +32,11 @@ def test_cpu_candidate_paths_cover_supported_rules_and_hybrid(tmp_path: Path) ->
     assert space.candidate_at(9) == "ab9"
 
 
-def test_mask_custom_charset_limit_is_four() -> None:
-    with pytest.raises(MaskSyntaxError, match="four"):
-        compile_mask("?1", ("a", "b", "c", "d", "e"))
+def test_mask_custom_charset_limit_is_eight() -> None:
+    custom = tuple("abcdefgh")
+    assert compile_mask("?1?8", custom) == custom[0:1] + custom[7:8]
+    with pytest.raises(MaskSyntaxError, match="eight"):
+        compile_mask("?1", (*custom, "i"))
 
 
 def test_parse_hcmask_skips_comments_and_keeps_escaped_leading_hash_and_charsets(
@@ -60,11 +62,18 @@ def test_parse_hcmask_reports_invalid_physical_lines(tmp_path: Path, content: st
         parse_hcmask(mask_file)
 
 
-def test_parse_hcmask_reports_the_four_charset_limit(tmp_path: Path) -> None:
-    mask_file = tmp_path / "too-many.hcmask"
-    mask_file.write_text("a,b,c,d,e,?1\n", encoding="utf-8")
+def test_parse_hcmask_accepts_eight_custom_charsets(tmp_path: Path) -> None:
+    mask_file = tmp_path / "eight.hcmask"
+    mask_file.write_text("a,b,c,d,e,f,g,h,?1\n", encoding="utf-8")
 
-    with pytest.raises(MaskSyntaxError, match="at most four"):
+    assert len(parse_hcmask(mask_file)[0].custom_charsets) == 8
+
+
+def test_parse_hcmask_reports_the_eight_charset_limit(tmp_path: Path) -> None:
+    mask_file = tmp_path / "too-many.hcmask"
+    mask_file.write_text("a,b,c,d,e,f,g,h,i,?1\n", encoding="utf-8")
+
+    with pytest.raises(MaskSyntaxError, match="at most eight"):
         parse_hcmask(mask_file)
 
 

@@ -10,7 +10,7 @@ from pdf_password_recovery.backends.hashcat_info import (
     HashcatCapabilities,
     PreflightReport,
 )
-from pdf_password_recovery.errors import ToolUnavailable
+from pdf_password_recovery.errors import ConfigurationError, ToolUnavailable
 from pdf_password_recovery.events import event_payload
 from pdf_password_recovery.models import (
     BackendChoice,
@@ -20,6 +20,8 @@ from pdf_password_recovery.models import (
     CursorKind,
     DictionaryAttack,
     DictionaryStage,
+    MaskAttack,
+    MaskStage,
     OutcomeStatus,
     RecoveryOutcome,
     WorkloadProfile,
@@ -112,6 +114,56 @@ def test_unicode_stage_and_pdf_names_are_slugged_before_events_and_sessions(tmp_
     assert stage_id.isascii() and stage_id[0].isalnum()
     assert summary.pdf_display_name.isascii()
     assert summary.pdf_display_name != pdf.name
+
+
+def test_auto_uses_cpu_for_eight_custom_charsets_and_hashcat_rejects_before_stage(
+    tmp_path: Path,
+) -> None:
+    pdf = tmp_path / "input.pdf"
+    pdf.write_bytes(b"%PDF-1.7")
+    attack = MaskAttack("?1", tuple("abcdefgh"))
+    source = MaskStage("wide-mask", mask=attack.mask)
+    stage = CompiledStage("wide-mask", attack, 1, True, source)
+    plan = CompiledPlan(1, "wide", (stage,), "1" * 64)
+    calls = []
+    preflight_calls = []
+
+    def recover(config, **kwargs):
+        calls.append(config.backend)
+        return RecoveryOutcome(
+            OutcomeStatus.EXHAUSTED,
+            None,
+            Cursor(CursorKind.INDEX, 1),
+            1,
+            0.1,
+            "cpu",
+        )
+
+    sink = Sink()
+    outcome = run_plan(
+        plan,
+        pdf_path=pdf,
+        backend=BackendChoice.AUTO,
+        recover_fn=recover,
+        preflight_fn=lambda _pdf, **kwargs: (preflight_calls.append(True) or _preflight()),
+        event_sink=sink,
+    )
+    assert outcome.status is OutcomeStatus.EXHAUSTED
+    assert calls == [BackendChoice.CPU]
+    assert preflight_calls == []
+    assert sink.events[1]["payload"]["backend"] == "cpu"
+
+    sink = Sink()
+    with pytest.raises(ConfigurationError, match="at most four"):
+        run_plan(
+            plan,
+            pdf_path=pdf,
+            backend=BackendChoice.HASHCAT,
+            recover_fn=recover,
+            preflight_fn=lambda _pdf, **kwargs: _preflight(),
+            event_sink=sink,
+        )
+    assert all(event["type"] != "stage_started" for event in sink.events)
 
 
 def test_auto_resolves_one_backend_before_recover_and_does_not_retry(tmp_path: Path) -> None:
