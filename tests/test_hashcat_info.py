@@ -50,6 +50,12 @@ def test_explicit_alias_duplicate_is_rejected():
         raise AssertionError("expected duplicate physical device rejection")
 
 
+def test_explicit_gpu_id_may_select_unified_memory_device():
+    device = DeviceInfo("3", "Intel UHD", "OpenCL", "GPU", True)
+    capabilities = HashcatCapabilities("7.1.2", "x", frozenset(), frozenset(), (device,))
+    assert select_devices(capabilities, "3") == (device,)
+
+
 def test_cache_round_trip_and_stale_state(tmp_path):
     cache = PreflightCache(tmp_path)
     cache.write("key", 1234.0)

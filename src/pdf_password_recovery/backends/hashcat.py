@@ -376,6 +376,15 @@ def _hashcat_length_rule(min_length: int, max_length: int) -> str:
     return f">{minimum}<{maximum}"
 
 
+def _rules_path(paths: SessionPaths) -> Path:
+    return paths.prefix.with_name(f"{paths.prefix.name}.rules")
+
+
+def _write_rules(path: Path, rules: Sequence[str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(rules) + "\n", encoding="utf-8", newline="\n")
+
+
 def build_hashcat_args(
     config: RecoveryConfig,
     toolchain: Toolchain,
@@ -420,6 +429,11 @@ def build_hashcat_args(
         args.extend((value, str(attack.wordlist.resolve())))
     elif isinstance(attack, RulesAttack):
         args = _common_args(toolchain, mode, 0, paths, device_ids, config.workload.hashcat_value)
+        if attack.min_length is not None:
+            args.extend(("-j", _hashcat_length_rule(attack.min_length, attack.max_length)))
+        rule_path = _rules_path(paths)
+        _write_rules(rule_path, attack.rules)
+        args.extend(("-r", str(rule_path)))
         args.extend((value, str(attack.wordlist.resolve())))
     elif isinstance(attack, MaskAttack):
         args = _common_args(toolchain, mode, 3, paths, device_ids, config.workload.hashcat_value)
@@ -536,6 +550,7 @@ def run_hashcat(
         raise HashcatExecutionError(f"hashcat failed: {detail}")
     finally:
         session_paths.outfile.unlink(missing_ok=True)
+        _rules_path(session_paths).unlink(missing_ok=True)
 
 
 def _run_live_hashcat(

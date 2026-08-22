@@ -10,6 +10,7 @@ from pdf_password_recovery.models import (
     HybridAttack,
     MaskAttack,
     RecoveryConfig,
+    RulesAttack,
     WorkloadProfile,
 )
 
@@ -52,6 +53,23 @@ def test_mask_and_hybrid_modes(tmp_path):
     assert "-a" in mask and mask[mask.index("-a") + 1] == "3"
     assert append[append.index("-a") + 1] == "6"
     assert prepend[prepend.index("-a") + 1] == "7"
+
+
+def test_rules_attack_writes_rule_file_and_keeps_length_rule(tmp_path):
+    rule_file = tmp_path / "test.rules"
+    config = RecoveryConfig(
+        Path("a.pdf"),
+        RulesAttack(tmp_path / "words.txt", ("c", "$1"), min_length=2, max_length=6),
+        backend=BackendChoice.HASHCAT,
+    )
+    args = build_hashcat_args(
+        config, Toolchain(("hashcat",), ("pdf2john",)), 10400, "hash", _paths(tmp_path)
+    )
+    assert "-r" in args
+    generated = Path(args[args.index("-r") + 1])
+    assert generated.name == rule_file.name
+    assert generated.read_text(encoding="utf-8") == "c\n$1\n"
+    assert args[args.index("-j") + 1] == ">2<6"
 
 
 def test_restore_has_no_attack_hash_or_potfile(tmp_path):

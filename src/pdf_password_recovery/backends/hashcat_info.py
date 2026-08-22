@@ -243,8 +243,6 @@ def select_devices(
             raise ToolIncompatible(f"hashcat device ID does not exist: {device_id}")
         if device.device_type.upper() != "GPU":
             raise ToolIncompatible(f"hashcat device ID is not a GPU: {device_id}")
-        if device.unified_memory:
-            raise ToolIncompatible(f"hashcat device ID uses unified memory: {device_id}")
         if device.id in seen_physical:
             raise ToolIncompatible("device aliases cannot select one physical GPU twice")
         seen_physical.add(device.id)
