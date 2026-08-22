@@ -21,6 +21,7 @@ from .models import (
     SessionSummary,
     WorkloadProfile,
 )
+from .orchestrator import run_plan
 from .plans import HcmaskEntry, built_in_plan, compile_plan, load_plan, parse_hcmask
 from .sessions import SessionStore
 
@@ -55,6 +56,7 @@ __all__ = [
     "compile_plan",
     "load_plan",
     "parse_hcmask",
+    "run_plan",
 ]
 
 __version__ = "1.0.0"
