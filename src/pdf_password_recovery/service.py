@@ -78,7 +78,7 @@ def _preflight(config: RecoveryConfig) -> None:
         with suppress(StopIteration):
             next(iterator)
     elif hasattr(attack, "mask"):
-        MaskSpace.compile(attack.mask)
+        MaskSpace.compile(attack.mask, getattr(attack, "custom_charsets", ()))
     else:
         BruteSpace.create(attack.charset, attack.min_length, attack.max_length)
 

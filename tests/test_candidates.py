@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from pdf_password_recovery.backends.hashcat import SessionPaths, Toolchain, build_hashcat_args
 from pdf_password_recovery.candidates import (
     BruteSpace,
     HybridSpace,
@@ -11,6 +12,7 @@ from pdf_password_recovery.candidates import (
     compile_mask,
 )
 from pdf_password_recovery.errors import MaskSyntaxError
+from pdf_password_recovery.models import BackendChoice, MaskAttack, RecoveryConfig
 from pdf_password_recovery.plans import parse_hcmask
 
 
@@ -61,3 +63,13 @@ def test_legacy_brute_space_boundaries_remain_unchanged() -> None:
 
     assert space.total == 110
     assert [space.candidate_at(index) for index in (0, 9, 10, 109)] == ["0", "9", "00", "99"]
+
+
+def test_mask_custom_charsets_reach_cpu_and_hashcat_argv_in_order(tmp_path: Path) -> None:
+    attack = MaskAttack("?1?2", ("ab", "CD"))
+    assert MaskSpace.compile(attack.mask, attack.custom_charsets).candidate_at(0) == "aC"
+
+    paths = SessionPaths(tmp_path / "session", tmp_path / "out", tmp_path / "restore")
+    config = RecoveryConfig(tmp_path / "protected.pdf", attack, BackendChoice.HASHCAT)
+    args = build_hashcat_args(config, Toolchain(("hashcat",), ("pdf2john",)), 10400, "hash", paths)
+    assert args[args.index("-1") : args.index("hash")] == ("-1", "ab", "-2", "CD")

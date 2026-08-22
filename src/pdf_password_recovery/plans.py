@@ -282,7 +282,7 @@ def _compile_stage(source, base_dir: Path, backend: BackendChoice) -> list[Compi
     raise ConfigurationError(f"unsupported stage type: {type(source).__name__}")
 
 
-_CPU_RULES = frozenset(rule for rule in SMART_RULES if rule not in {"$!", "$@"})
+_CPU_RULES = frozenset(SMART_RULES)
 
 
 def _compiled(stage_id, attack, keyspace, cpu_compatible, source, backend):

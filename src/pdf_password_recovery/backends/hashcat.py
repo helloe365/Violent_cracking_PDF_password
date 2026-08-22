@@ -427,6 +427,10 @@ def build_hashcat_args(
         args.extend((value, str(attack.wordlist.resolve())))
     elif isinstance(attack, MaskAttack):
         args = _common_args(toolchain, mode, 3, paths, device_ids)
+        if len(attack.custom_charsets) > 4:
+            raise ToolIncompatible("hashcat supports at most four custom charsets")
+        for index, charset in enumerate(attack.custom_charsets, start=1):
+            args.extend((f"-{index}", _brute_charset(charset)))
         args.extend((value, attack.mask))
     elif isinstance(attack, BruteAttack):
         charset = _brute_charset(attack.charset)

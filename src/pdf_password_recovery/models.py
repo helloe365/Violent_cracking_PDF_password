@@ -130,6 +130,14 @@ class BruteAttack:
     min_length: int = 4
     max_length: int = 6
 
+    def __post_init__(self) -> None:
+        if isinstance(self.min_length, bool) or not isinstance(self.min_length, int):
+            raise ConfigurationError("minimum length must be an integer")
+        if isinstance(self.max_length, bool) or not isinstance(self.max_length, int):
+            raise ConfigurationError("maximum length must be an integer")
+        if self.min_length < 1 or self.max_length < self.min_length:
+            raise ConfigurationError("invalid brute-force length range")
+
     @property
     def kind(self) -> AttackKind:
         return AttackKind.BRUTE

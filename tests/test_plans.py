@@ -80,7 +80,9 @@ def test_load_plan_requires_the_exact_schema_and_resolves_relative_paths(tmp_pat
         },
     ],
 )
-def test_load_plan_rejects_unknown_or_invalid_schema_values(tmp_path: Path, payload: object) -> None:
+def test_load_plan_rejects_unknown_or_invalid_schema_values(
+    tmp_path: Path, payload: object
+) -> None:
     with pytest.raises(PlanSchemaError) as raised:
         load_plan(_write_plan(tmp_path / "invalid.json", payload))
 
@@ -106,9 +108,7 @@ def test_load_plan_resolves_only_the_documented_builtin_references(tmp_path: Pat
     plan = load_plan(_write_plan(tmp_path / "builtins.json", payload))
 
     assert plan.stages[0] == DictionaryStage(id="words", wordlist=bundled_wordlist())
-    assert plan.stages[1] == RulesStage(
-        id="rules", wordlist=bundled_wordlist(), rules=SMART_RULES
-    )
+    assert plan.stages[1] == RulesStage(id="rules", wordlist=bundled_wordlist(), rules=SMART_RULES)
     mask_stage = plan.stages[2]
     assert isinstance(mask_stage, MaskStage)
     assert mask_stage.mask_file is not None
@@ -162,7 +162,7 @@ def test_compile_plan_marks_external_rules_hashcat_required_and_cpu_refuses_them
                         "id": "external",
                         "type": "rules",
                         "wordlist": wordlist.name,
-                        "rules": ["$!"],
+                        "rules": ["unsupported-rule"],
                     }
                 ],
             },
@@ -174,3 +174,26 @@ def test_compile_plan_marks_external_rules_hashcat_required_and_cpu_refuses_them
     assert automatic.stages[0].cpu_compatible is False
     with pytest.raises(ConfigurationError):
         compile_plan(plan, base_dir=tmp_path, backend=BackendChoice.CPU)
+
+
+def test_load_plan_rejects_reversed_brute_bounds(tmp_path: Path) -> None:
+    with pytest.raises(PlanSchemaError) as raised:
+        load_plan(
+            _write_plan(
+                tmp_path / "invalid-brute.json",
+                {
+                    "schema": 1,
+                    "name": "invalid-brute",
+                    "stages": [
+                        {
+                            "id": "brute",
+                            "type": "brute",
+                            "charset": "digits",
+                            "min_length": 8,
+                            "max_length": 4,
+                        }
+                    ],
+                },
+            )
+        )
+    assert raised.value.code == "plan_schema"

@@ -109,7 +109,7 @@ class _TaskProvider:
                 **chunk_options,
             )
         elif isinstance(self.attack, MaskAttack):
-            self.total = MaskSpace.compile(self.attack.mask).total
+            self.total = MaskSpace.compile(self.attack.mask, self.attack.custom_charsets).total
         else:
             self.total = BruteSpace.create(
                 self.attack.charset, self.attack.min_length, self.attack.max_length
@@ -347,7 +347,7 @@ def _candidate_space(attack):
     if isinstance(attack, DictionaryAttack):
         return None
     if isinstance(attack, MaskAttack):
-        return MaskSpace.compile(attack.mask)
+        return MaskSpace.compile(attack.mask, attack.custom_charsets)
     return BruteSpace.create(attack.charset, attack.min_length, attack.max_length)
 
 
