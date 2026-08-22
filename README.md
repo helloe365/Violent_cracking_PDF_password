@@ -118,6 +118,85 @@ Non-interactive runs must specify an attack mode and include `--yes`:
   --min-length 1 --max-length 8 --backend cpu --yes
 ```
 
+### Plans, preflight, and sessions
+
+The original positional CLI and the zero-argument Chinese wizard remain
+compatible. New first-token commands are `plan`, `preflight`, and `sessions`.
+Use `plan` to preview or run a built-in profile:
+
+```powershell
+python -m pdf_password_recovery plan protected.pdf --profile balanced `
+  --min-length 4 --max-length 6 --workload balanced --device auto --dry-run
+python -m pdf_password_recovery plan protected.pdf --profile balanced `
+  --hints-file hints.txt --session demo --output artifacts/password.txt --yes
+python -m pdf_password_recovery plan protected.pdf --file plan.json --json --yes
+```
+
+`fast` is dictionary plus numeric masks; `balanced` adds smart rules and
+common masks (and optional hint rules/hybrid stages); `thorough` adds lower,
+upper, and bounded alphanumeric stages. `--dry-run` compiles stages without
+recovering. `--json` emits JSONL only; `--workload` is `quiet`, `balanced`, or
+`fast`, and `--device` is `auto` or a comma-separated hashcat device ID list.
+
+Plan files use strict schema 1. The only top-level fields are `schema`, `name`,
+and `stages`; paths are relative to the plan file. Supported stage forms are
+`dictionary`, `rules`, `mask` (inline `mask` or `mask_file`), `hybrid` (with
+`direction` `append`/`prepend`), and bounded `brute`:
+
+```json
+{
+  "schema": 1,
+  "name": "small-local-plan",
+  "stages": [
+    {"id": "words", "type": "dictionary", "wordlist": "builtin:wordlist"},
+    {"id": "rules", "type": "rules", "wordlist": "builtin:wordlist", "rules": "builtin:smart-rules"},
+    {"id": "mask", "type": "mask", "mask": "?u?l?l?d?d"},
+    {"id": "common", "type": "mask", "mask_file": "builtin:common-masks"},
+    {"id": "hybrid", "type": "hybrid", "wordlist": "words.txt", "mask": "?d?d", "direction": "append"},
+    {"id": "brute", "type": "brute", "charset": "digits", "min_length": 1, "max_length": 6}
+  ]
+}
+```
+
+`.hcmask` files support comments, escaped leading `#`, and up to eight custom
+character sets. Built-in URIs are `builtin:wordlist`,
+`builtin:smart-rules`, and `builtin:common-masks`.
+
+JSONL events have schema 1 and one of `preflight`, `stage_started`, `progress`,
+`warning`, `checkpoint`, `result`, or `error`. A result contains status and
+counters, never a password or extracted `$pdf$` hash:
+
+```json
+{"schema":1,"type":"result","timestamp":"2026-01-01T00:00:00.000Z","session":"demo","payload":{"status":"exhausted","stage_id":"words","attempted":12,"elapsed_seconds":0.4,"backend":"cpu"}}
+```
+
+Run a short hashcat preflight before GPU work:
+
+```powershell
+python -m pdf_password_recovery preflight protected.pdf --workload balanced --device auto
+python -m pdf_password_recovery preflight protected.pdf --refresh --json
+```
+
+The benchmark is a three-second estimate and is cached for seven days. A
+failed benchmark reports unknown ETA; it never invents a speed. Automatic
+selection uses discrete GPU devices (non-unified memory); explicit IDs are
+validated. Real GPU recovery still requires a working local hashcat/pdf2john
+toolchain and compatible driver.
+
+Session summaries are managed with:
+
+```powershell
+python -m pdf_password_recovery sessions list
+python -m pdf_password_recovery sessions show demo --json
+python -m pdf_password_recovery sessions delete demo --yes
+python -m pdf_password_recovery sessions prune --older-than 30 --yes
+```
+
+`delete` and `prune` require confirmation (or `--yes`); `prune` removes only
+terminal `found`, `exhausted`, and `failed` sessions. Active and interrupted
+sessions are retained. OS file locks prevent concurrent deletion or execution,
+and interrupted sessions retain their restore material.
+
 ## Smart Recovery Workflow
 
 The smart orchestrator applies one password-length range across a fixed sequence:
@@ -226,11 +305,10 @@ The wordlist ships with the package. It is neither downloaded at runtime nor exp
 ## Development and Validation
 
 ```powershell
-python -m pytest --cov=pdf_password_recovery --cov-fail-under=80
+python -m pytest --basetemp .pytest-task5
 python -m ruff check .
 python -m ruff format --check .
 python -m build
-python benchmarks\benchmark_cpu.py --candidates 1000 --batch-size 100
 ```
 
 External-tool integration tests are skipped by default. Run them only after confirming that hashcat, `pdf2john`, and a compatible GPU are available:
@@ -245,8 +323,11 @@ python -m pytest tests\test_external_tools.py -v
 - The tool reads only the local PDF and wordlist paths explicitly provided to it.
 - It contains no network scanning, remote target discovery, bulk target search, stealth, or detection-evasion functionality.
 - Checkpoints and smart-session state never store a recovered plaintext password.
-- Recovered passwords are printed to the terminal by default and written only when `--output` is specified.
+- JSONL events and session summaries never store plaintext passwords, extracted `$pdf$` hashes, or hints content.
+- Human-mode recovery prints the password to stdout by default; it is written to a file only when `--output` is specified. JSON mode remains password-free.
+- Hashcat always uses `--potfile-disable`.
 - Session state defaults to the operating system's per-user data directory. Override it with `PDF_PASSWORD_RECOVERY_STATE_DIR` when needed.
+- Use is limited to local PDF files that you own or are authorized to access; there is no network or remote-target workflow.
 
 ## License
 

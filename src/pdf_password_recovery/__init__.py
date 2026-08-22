@@ -59,4 +59,4 @@ __all__ = [
     "run_plan",
 ]
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"

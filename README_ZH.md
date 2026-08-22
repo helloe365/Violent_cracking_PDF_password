@@ -118,6 +118,80 @@ powershell -ExecutionPolicy Bypass -File .\Install.ps1 -CpuOnly
   --min-length 1 --max-length 8 --backend cpu --yes
 ```
 
+### 计划、预检与会话
+
+旧的位置参数 CLI 和零参数中文向导保持兼容；新增的首个参数命令为
+`plan`、`preflight`、`sessions`。可以先预览内置计划，再执行计划：
+
+```powershell
+python -m pdf_password_recovery plan protected.pdf --profile balanced `
+  --min-length 4 --max-length 6 --workload balanced --device auto --dry-run
+python -m pdf_password_recovery plan protected.pdf --profile balanced `
+  --hints-file hints.txt --session demo --output artifacts/password.txt --yes
+python -m pdf_password_recovery plan protected.pdf --file plan.json --json --yes
+```
+
+`fast` 为字典加数字掩码；`balanced` 追加智能规则和常用掩码，并可根据
+提示文件添加提示规则与混合阶段；`thorough` 再追加大小写掩码和限定的
+字母数字穷举。`--dry-run` 只编译并显示阶段，不执行恢复。`--json` 只输出
+JSONL；`--workload` 可选 `quiet`、`balanced`、`fast`，`--device` 为
+`auto` 或逗号分隔的 hashcat 设备 ID。
+
+计划文件严格使用 schema 1，顶层字段只能是 `schema`、`name`、`stages`，
+相对路径以计划文件所在目录为基准。支持 `dictionary`、`rules`、`mask`
+（二选一使用 `mask` 或 `mask_file`）、`hybrid`（`direction` 为 `append`
+或 `prepend`）和限定范围的 `brute`：
+
+```json
+{
+  "schema": 1,
+  "name": "small-local-plan",
+  "stages": [
+    {"id": "words", "type": "dictionary", "wordlist": "builtin:wordlist"},
+    {"id": "rules", "type": "rules", "wordlist": "builtin:wordlist", "rules": "builtin:smart-rules"},
+    {"id": "mask", "type": "mask", "mask": "?u?l?l?d?d"},
+    {"id": "common", "type": "mask", "mask_file": "builtin:common-masks"},
+    {"id": "hybrid", "type": "hybrid", "wordlist": "words.txt", "mask": "?d?d", "direction": "append"},
+    {"id": "brute", "type": "brute", "charset": "digits", "min_length": 1, "max_length": 6}
+  ]
+}
+```
+
+`.hcmask` 支持注释、转义的行首 `#`，以及最多八个自定义字符集。内置 URI
+为 `builtin:wordlist`、`builtin:smart-rules` 和 `builtin:common-masks`。
+
+JSONL 事件 schema 为 1，事件类型为 `preflight`、`stage_started`、`progress`、
+`warning`、`checkpoint`、`result`、`error` 之一。结果事件只含状态和计数，
+不含密码或提取出的 `$pdf$` 哈希：
+
+```json
+{"schema":1,"type":"result","timestamp":"2026-01-01T00:00:00.000Z","session":"demo","payload":{"status":"exhausted","stage_id":"words","attempted":12,"elapsed_seconds":0.4,"backend":"cpu"}}
+```
+
+GPU 运行前可执行短时预检：
+
+```powershell
+python -m pdf_password_recovery preflight protected.pdf --workload balanced --device auto
+python -m pdf_password_recovery preflight protected.pdf --refresh --json
+```
+
+预检基准运行三秒，用于估算，并缓存七天；基准失败时 ETA 显示未知，不会
+伪造速度。自动选择只使用非统一内存的独立 GPU，显式设备 ID 会校验是否存在。
+真实 GPU 恢复仍需要本地可用的 hashcat/pdf2john 和兼容驱动。
+
+会话命令如下：
+
+```powershell
+python -m pdf_password_recovery sessions list
+python -m pdf_password_recovery sessions show demo --json
+python -m pdf_password_recovery sessions delete demo --yes
+python -m pdf_password_recovery sessions prune --older-than 30 --yes
+```
+
+`delete`、`prune` 需要交互确认（或 `--yes`）；`prune` 只删除终态的
+`found`、`exhausted`、`failed` 会话，运行中和中断会话默认保留。操作使用
+OS 文件锁防止并发删除/执行；中断会话会保留恢复材料。
+
 ## 智能流程与 API
 
 智能编排器按以下顺序运行，并对所有阶段应用同一长度范围：
@@ -226,11 +300,10 @@ hashcat 固定使用 GPU 类型设备。若同时检测到独显和共享内存�
 ## 开发与验证
 
 ```powershell
-python -m pytest --cov=pdf_password_recovery --cov-fail-under=80
+python -m pytest --basetemp .pytest-task5
 python -m ruff check .
 python -m ruff format --check .
 python -m build
-python benchmarks\benchmark_cpu.py --candidates 1000 --batch-size 100
 ```
 
 外部工具集成测试默认跳过。确认本机 hashcat、pdf2john 和 GPU 环境可用后执行：
@@ -245,8 +318,11 @@ python -m pytest tests\test_external_tools.py -v
 - 只读取命令中明确提供的本地 PDF 和字典文件。
 - 不包含网络扫描、远程目标发现、批量目标搜索、隐蔽或规避检测功能。
 - 检查点与智能状态不保存找到的明文密码。
-- 成功密码默认仅输出到终端；只有指定 `--output` 时才写入文件。
+- JSONL 事件和会话摘要不保存明文密码、提取出的 `$pdf$` 哈希或提示文件内容。
+- 人类可读模式默认将密码输出到 stdout；只有指定 `--output` 时才写入文件。JSON 模式始终不输出密码。
+- hashcat 始终使用 `--potfile-disable`。
 - 会话和状态默认保存在系统用户数据目录，可用 `PDF_PASSWORD_RECOVERY_STATE_DIR` 指定其他位置。
+- 仅限处理自己拥有或已获授权的本地 PDF；项目不提供网络或远程目标流程。
 
 ## License
 
