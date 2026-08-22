@@ -192,7 +192,12 @@ def run_plan(
                     raise ToolUnavailable(f"stage '{stage.id}' requires hashcat")
                 if backend is BackendChoice.AUTO and not stage.cpu_compatible and not hashcat_ready:
                     raise ToolUnavailable(f"stage '{stage.id}' requires hashcat")
-                stage_backend = backend.value
+                stage_backend_choice = (
+                    BackendChoice.HASHCAT
+                    if backend is not BackendChoice.CPU and hashcat_ready
+                    else BackendChoice.CPU
+                )
+                stage_backend = stage_backend_choice.value
                 _emit(
                     event_sink,
                     EventType.STAGE_STARTED,
@@ -247,7 +252,7 @@ def run_plan(
                 config = RecoveryConfig(
                     Path(pdf_path),
                     stage.attack,
-                    backend=backend,
+                    backend=stage_backend_choice,
                     workers=workers,
                     session=session,
                     output=output,
@@ -374,7 +379,7 @@ def run_plan(
             )
             return replace(last, attempted=attempted_total)
     except KeyboardInterrupt:
-        if session and current is not None:
+        if session:
             store.save(
                 _summary(
                     session,
@@ -385,7 +390,7 @@ def run_plan(
                     current,
                     SessionStatus.INTERRUPTED,
                     attempted_total,
-                    current.keyspace,
+                    current.keyspace if current else 0,
                     time.monotonic() - started,
                 )
             )
@@ -415,7 +420,7 @@ def run_plan(
             )
         raise
     except Exception as exc:
-        if session and current is not None:
+        if session:
             store.save(
                 _summary(
                     session,
@@ -426,7 +431,7 @@ def run_plan(
                     current,
                     SessionStatus.FAILED,
                     attempted_total,
-                    current.keyspace,
+                    current.keyspace if current else 0,
                     time.monotonic() - started,
                 )
             )

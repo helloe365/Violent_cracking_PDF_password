@@ -21,10 +21,12 @@ from .models import (
     BackendChoice,
     BruteAttack,
     DictionaryAttack,
+    HybridAttack,
     MaskAttack,
     OutcomeStatus,
     Progress,
     RecoveryConfig,
+    RulesAttack,
     WorkloadProfile,
 )
 from .wordlists import iter_wordlist_chunks
@@ -498,6 +500,7 @@ def _plan_command(
         plan = built_in_plan(ns.profile, ns.pdf, ns.min_length, ns.max_length, ns.hints_file)
         base_dir = ns.pdf.resolve().parent
     compiled = compile_plan(plan, base_dir=base_dir, backend=BackendChoice(ns.backend))
+    _validate_plan_output(ns.output, ns.pdf, ns.file, ns.hints_file, compiled)
     sink = JsonLineSink(output) if ns.json else None
     if ns.dry_run:
         if ns.backend != "cpu":
@@ -630,6 +633,33 @@ def _preflight_command(argv: Sequence[str], output: TextIO) -> int:
         print(f"设备: {', '.join(device.id for device in report.selected_devices)}", file=output)
         print(f"基准速度: {report.benchmark_hps or 'unknown'} H/s", file=output)
     return 0
+
+
+def _validate_plan_output(
+    output: Path | None,
+    pdf: Path,
+    plan_file: Path | None,
+    hints_file: Path | None,
+    compiled: object,
+) -> None:
+    if output is None:
+        return
+    output_path = output.expanduser().resolve(strict=False)
+    input_paths = {pdf.expanduser().resolve(strict=False)}
+    if plan_file is not None:
+        input_paths.add(plan_file.expanduser().resolve(strict=False))
+    if hints_file is not None:
+        input_paths.add(hints_file.expanduser().resolve(strict=False))
+    for stage in compiled.stages:
+        attack = stage.attack
+        if isinstance(attack, (DictionaryAttack, RulesAttack, HybridAttack)):
+            input_paths.add(attack.wordlist.expanduser().resolve(strict=False))
+        source = stage.source
+        mask_file = getattr(source, "mask_file", None)
+        if mask_file is not None:
+            input_paths.add(Path(mask_file).expanduser().resolve(strict=False))
+    if output_path in input_paths:
+        raise ConfigurationError("output path must differ from plan input files")
 
 
 def _session_json(summary: object) -> str:

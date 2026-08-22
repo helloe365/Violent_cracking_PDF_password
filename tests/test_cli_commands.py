@@ -37,3 +37,43 @@ def test_sessions_list_json_has_no_secret(tmp_path, monkeypatch) -> None:
     output = StringIO()
     assert entrypoint(("sessions", "list", "--json"), output=output, is_tty=False) == 0
     assert output.getvalue() == ""
+
+
+def test_plan_output_cannot_overwrite_pdf_or_wordlist(tmp_path) -> None:
+    pdf = tmp_path / "input.pdf"
+    pdf.write_bytes(b"%PDF-1.7")
+    words = tmp_path / "words.txt"
+    words.write_text("one\n", encoding="utf-8")
+    plan = tmp_path / "plan.json"
+    plan.write_text(
+        json.dumps(
+            {
+                "schema": 1,
+                "name": "test",
+                "stages": [{"id": "dictionary", "type": "dictionary", "wordlist": "words.txt"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    error = StringIO()
+    assert (
+        entrypoint(
+            (
+                "plan",
+                str(pdf),
+                "--file",
+                str(plan),
+                "--output",
+                str(words),
+                "--dry-run",
+                "--backend",
+                "cpu",
+            ),
+            output=StringIO(),
+            error=error,
+            is_tty=False,
+        )
+        == 2
+    )
+    assert "output path" in error.getvalue()
+    assert words.read_text(encoding="utf-8") == "one\n"
