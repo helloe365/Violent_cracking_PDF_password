@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "pdf-password-recovery"
 version = "1.1.0"
 description = "Authorized local PDF password recovery with CPU and hashcat backends"
-readme = "README.md"
+readme = "README_EN.md"
 requires-python = ">=3.11"
 license = "MIT"
 license-files = ["LICENSE"]
