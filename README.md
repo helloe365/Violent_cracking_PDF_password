@@ -1,39 +1,39 @@
 # PDF Password Recovery
 
-[中文](README_ZH.md) | **English**
+**中文** | [English](README_EN.md)
 
-A Windows-first command-line tool for recovering passwords from local PDF files that you own or are authorized to access. It combines a multiprocessing CPU backend with optional hashcat GPU acceleration, staged smart recovery, bounded candidate generation, and resumable sessions.
+面向自有或已获授权文件的本地 PDF 密码恢复工具。项目提供 Windows 多进程 CPU 后端、可选的 hashcat GPU 后端、字典/规则/掩码/有限穷举策略，以及可恢复的检查点。
 
-> Use this software only with local PDF files you are authorized to access. Do not use it against unauthorized files or systems.
+> 仅可处理你有权访问的本地 PDF。请勿用于未经授权的文件或系统。
 
-## Highlights
+## 功能概览
 
-- **Efficient CPU recovery:** multiprocessing workers, streaming candidate generation, and bounded queues keep memory usage predictable.
-- **GPU acceleration:** hashcat and `pdf2john` provide real-time speed and progress reporting on supported discrete GPUs.
-- **Multiple attack modes:** dictionary, rule mutation, hashcat-style masks, custom character sets, and length-bounded brute force.
-- **Smart recovery:** common passwords → high-value mutations → dynamic masks → bounded `alnum` brute force.
-- **Safe resume:** CPU checkpoints and native hashcat restore files; state files never store a recovered plaintext password.
-- **Bundled dictionary:** the 10-million-entry SecLists `Pwdb_top-10000000.txt` wordlist is available offline.
-- **No forced time limit:** stop safely with `Ctrl+C` and resume an explicitly interrupted stage later.
+- CPU：多进程、流式候选、有限队列，不把搜索空间整体载入内存。
+- GPU：通过 hashcat 和 pdf2john 使用独立显卡，并实时显示速度与进度。
+- 攻击方式：字典、hashcat 风格掩码、自定义字符集和限定长度穷举。
+- 智能编排：常用字典 → 高频规则变形 → 动态掩码 → `alnum` 有限穷举。
+- 恢复：CPU checkpoint 与 hashcat restore；状态文件不保存找到的明文密码。
+- 内置字典：SecLists `Pwdb_top-10000000.txt`，共 1000 万行。
+- 无运行时间上限；需要停止时按 `Ctrl+C`，之后可恢复明确中断的阶段。
 
-## Requirements
+## 环境要求
 
-- Windows 10 or Windows 11
-- Python 3.11 or later
-- CPU recovery needs no external tools; the one-command installer configures the tools needed for GPU recovery.
-- You remain responsible for installing and updating GPU drivers; preflight only inspects devices visible to the current toolchain.
+- Windows 10/11
+- Python 3.11+
+- CPU 模式无需外部程序；一键安装会为 GPU 模式配置所需工具。
+- GPU 驱动仍由你负责安装和更新；预检只检查当前工具链可见的设备。
 
-## Installation
+## 安装
 
-From the repository root, run:
+在仓库根目录执行：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\Install.ps1
 ```
 
-The script creates or reuses `.venv`, installs the project's `dev` and `gpu` dependencies, downloads `pdf-password-recovery-gpu-tools-windows-x64-v7.1.2.zip` from the pinned `gpu-tools-v7.1.2-r1` Release, verifies its SHA256, installs the GPU tools, and runs hashcat device preflight. Rerunning it reuses the existing virtual environment; a matching installation skips download, extraction, and device preflight. To refresh the device status, manually run `Push-Location .\downloads\gpu-tools\hashcat-7.1.2; try { & .\hashcat.exe -I } finally { Pop-Location }`.
+该脚本会创建或复用 `.venv`，安装项目的 `dev` 和 `gpu` 依赖，下载固定 Release `gpu-tools-v7.1.2-r1` 中的 `pdf-password-recovery-gpu-tools-windows-x64-v7.1.2.zip`，校验 SHA256 后安装 GPU 工具，并运行 hashcat 设备预检。重复运行会复用现有虚拟环境；匹配安装会跳过下载、解压和设备预检。需要刷新设备状态时，手工运行 `Push-Location .\downloads\gpu-tools\hashcat-7.1.2; try { & .\hashcat.exe -I } finally { Pop-Location }`。
 
-If downloads are slow or fail, especially for users in mainland China, configure a working HTTP/HTTPS proxy before running the installer. Replace the port with the one used by your proxy client:
+如果下载速度较慢或经常失败，尤其是在中国大陆，建议在运行安装脚本前配置可用的 HTTP/HTTPS 代理。请将端口替换为代理客户端实际使用的端口：
 
 ```powershell
 $env:HTTP_PROXY = "http://127.0.0.1:7897"
@@ -41,35 +41,35 @@ $env:HTTPS_PROXY = "http://127.0.0.1:7897"
 powershell -ExecutionPolicy Bypass -File .\Install.ps1
 ```
 
-The proxy can improve access to PyPI dependencies and the GitHub GPU-tool release, but speed depends on the proxy node and network conditions.
+代理可能改善 PyPI 依赖和 GitHub GPU 工具 Release 的访问速度，但实际速度取决于代理节点和网络状况。
 
-If preflight finds no compatible GPU, it warns and preserves CPU fallback; it does not prove that GPU recovery will succeed. An integrity or installation failure exits nonzero. For CPU-only use, skip the GPU tool download and preflight:
+预检未发现兼容 GPU 时会发出警告，CPU 回退仍可用；这不表示 GPU 恢复已经验证成功。下载完整性或安装失败会以非零状态退出。若只需要 CPU，跳过 GPU 工具下载和预检：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\Install.ps1 -CpuOnly
 ```
 
-`-CpuOnly` skips only GPU tool installation and device preflight; it does not force later recovery runs to use the CPU. To force CPU execution, pass `--backend cpu` to the recovery command.
+`-CpuOnly` 只跳过 GPU 工具安装与设备预检，不会强制之后的恢复任务使用 CPU。若要强制 CPU 运行，请在恢复命令中传入 `--backend cpu`。
 
-After installation, verify the command-line entry point:
+安装后查看帮助：
 
 ```powershell
 .\.venv\Scripts\python.exe -m pdf_password_recovery --help
 ```
 
-## Quick Start
+# 快速开始
 
-### Guided smart recovery
+# 零参数向导 -- 直接使用这个就可以
 
 ```powershell
 .\.venv\Scripts\python.exe -m pdf_password_recovery
 ```
 
-Running the command without arguments opens a Chinese-language guided workflow. It asks for the PDF path, minimum and maximum password lengths, and the number of CPU fallback workers. The default length range is `4–6`.
+零参数入口会进入中文智能向导，依次询问 PDF 路径、最小长度、最大长度和 CPU 回退进程数。确认后按“常用字典 → 规则变形 → 动态掩码 → 有限穷举”执行，默认长度为 `4–6`。后端为 `auto`：优先使用 GPU/hashcat，不可用时回退 CPU。
 
-The workflow uses the `auto` backend: it prefers GPU/hashcat and falls back to CPU when the GPU toolchain is unavailable before candidate processing begins. If a matching unfinished smart session exists, the wizard asks whether to resume it or start again. Press `Ctrl+C` whenever you need to stop safely.
+检测到匹配的未完成智能任务时，向导会询问继续恢复还是重新开始。流程没有运行时间上限，需要停止时按 `Ctrl+C`。
 
-### Dictionary attack
+### 字典攻击
 
 ```powershell
 .\.venv\Scripts\python.exe -m pdf_password_recovery protected.pdf `
@@ -78,7 +78,7 @@ The workflow uses the `auto` backend: it prefers GPU/hashcat and falls back to C
   --backend auto
 ```
 
-### Mask attack
+### 掩码攻击
 
 ```powershell
 .\.venv\Scripts\python.exe -m pdf_password_recovery protected.pdf `
@@ -87,17 +87,17 @@ The workflow uses the `auto` backend: it prefers GPU/hashcat and falls back to C
   --backend auto
 ```
 
-Supported mask tokens:
+掩码标记：
 
-| Token  | Candidates                        |
-| ------ | --------------------------------- |
-| `?d` | Digits                            |
-| `?l` | Lowercase letters                 |
-| `?u` | Uppercase letters                 |
-| `?a` | All 95 printable ASCII characters |
-| `??` | A literal question mark           |
+| 标记   | 候选字符               |
+| ------ | ---------------------- |
+| `?d` | 数字                   |
+| `?l` | 小写字母               |
+| `?u` | 大写字母               |
+| `?a` | 95 个可打印 ASCII 字符 |
+| `??` | 字面问号               |
 
-### Length-bounded brute force
+### 有限穷举
 
 ```powershell
 .\.venv\Scripts\python.exe -m pdf_password_recovery protected.pdf `
@@ -109,20 +109,19 @@ Supported mask tokens:
   --backend auto
 ```
 
-Built-in character-set presets are `digits`, `lower`, `upper`, `letters`, and `alnum`. You can also pass a custom character set; duplicate characters are removed while preserving their first-seen order.
+字符集预设包括 `digits`、`lower`、`upper`、`letters` 和 `alnum`。也可以直接传入自定义字符集；重复字符会按首次出现顺序去重。
 
-Non-interactive runs must specify an attack mode and include `--yes`:
+非交互运行必须明确指定攻击方式并添加 `--yes`：
 
 ```powershell
 .\.venv\Scripts\python.exe -m pdf_password_recovery protected.pdf --attack brute --charset digits `
   --min-length 1 --max-length 8 --backend cpu --yes
 ```
 
-### Plans, preflight, and sessions
+### 计划、预检与会话
 
-The original positional CLI and the zero-argument Chinese wizard remain
-compatible. New first-token commands are `plan`, `preflight`, and `sessions`.
-Use `plan` to preview or run a built-in profile:
+旧的位置参数 CLI 和零参数中文向导保持兼容；新增的首个参数命令为
+`plan`、`preflight`、`sessions`。可以先预览内置计划，再执行计划：
 
 ```powershell
 python -m pdf_password_recovery plan protected.pdf --profile balanced `
@@ -132,16 +131,16 @@ python -m pdf_password_recovery plan protected.pdf --profile balanced `
 python -m pdf_password_recovery plan protected.pdf --file plan.json --json --yes
 ```
 
-`fast` is dictionary plus numeric masks; `balanced` adds smart rules and
-common masks (and optional hint rules/hybrid stages); `thorough` adds lower,
-upper, and bounded alphanumeric stages. `--dry-run` compiles stages without
-recovering. `--json` emits JSONL only; `--workload` is `quiet`, `balanced`, or
-`fast`, and `--device` is `auto` or a comma-separated hashcat device ID list.
+`fast` 为字典加数字掩码；`balanced` 追加智能规则和常用掩码，并可根据
+提示文件添加提示规则与混合阶段；`thorough` 再追加大小写掩码和限定的
+字母数字穷举。`--dry-run` 只编译并显示阶段，不执行恢复。`--json` 只输出
+JSONL；`--workload` 可选 `quiet`、`balanced`、`fast`，`--device` 为
+`auto` 或逗号分隔的 hashcat 设备 ID。
 
-Plan files use strict schema 1. The only top-level fields are `schema`, `name`,
-and `stages`; paths are relative to the plan file. Supported stage forms are
-`dictionary`, `rules`, `mask` (inline `mask` or `mask_file`), `hybrid` (with
-`direction` `append`/`prepend`), and bounded `brute`:
+计划文件严格使用 schema 1，顶层字段只能是 `schema`、`name`、`stages`，
+相对路径以计划文件所在目录为基准。支持 `dictionary`、`rules`、`mask`
+（二选一使用 `mask` 或 `mask_file`）、`hybrid`（`direction` 为 `append`
+或 `prepend`）和限定范围的 `brute`：
 
 ```json
 {
@@ -158,32 +157,29 @@ and `stages`; paths are relative to the plan file. Supported stage forms are
 }
 ```
 
-`.hcmask` files support comments, escaped leading `#`, and up to eight custom
-character sets. Built-in URIs are `builtin:wordlist`,
-`builtin:smart-rules`, and `builtin:common-masks`.
+`.hcmask` 支持注释、转义的行首 `#`，以及最多八个自定义字符集。内置 URI
+为 `builtin:wordlist`、`builtin:smart-rules` 和 `builtin:common-masks`。
 
-JSONL events have schema 1 and one of `preflight`, `stage_started`, `progress`,
-`warning`, `checkpoint`, `result`, or `error`. A result contains status and
-counters, never a password or extracted `$pdf$` hash:
+JSONL 事件 schema 为 1，事件类型为 `preflight`、`stage_started`、`progress`、
+`warning`、`checkpoint`、`result`、`error` 之一。结果事件只含状态和计数，
+不含密码或提取出的 `$pdf$` 哈希：
 
 ```json
 {"schema":1,"type":"result","timestamp":"2026-01-01T00:00:00.000Z","session":"demo","payload":{"status":"exhausted","stage_id":"words","attempted":12,"elapsed_seconds":0.4,"backend":"cpu"}}
 ```
 
-Run a short hashcat preflight before GPU work:
+GPU 运行前可执行短时预检：
 
 ```powershell
 python -m pdf_password_recovery preflight protected.pdf --workload balanced --device auto
 python -m pdf_password_recovery preflight protected.pdf --refresh --json
 ```
 
-The benchmark is a three-second estimate and is cached for seven days. A
-failed benchmark reports unknown ETA; it never invents a speed. Automatic
-selection uses discrete GPU devices (non-unified memory); explicit IDs are
-validated. Real GPU recovery still requires a working local hashcat/pdf2john
-toolchain and compatible driver.
+预检基准运行三秒，用于估算，并缓存七天；基准失败时 ETA 显示未知，不会
+伪造速度。自动选择只使用非统一内存的独立 GPU，显式设备 ID 会校验是否存在。
+真实 GPU 恢复仍需要本地可用的 hashcat/pdf2john 和兼容驱动。
 
-Session summaries are managed with:
+会话命令如下：
 
 ```powershell
 python -m pdf_password_recovery sessions list
@@ -192,21 +188,20 @@ python -m pdf_password_recovery sessions delete demo --yes
 python -m pdf_password_recovery sessions prune --older-than 30 --yes
 ```
 
-`delete` and `prune` require confirmation (or `--yes`); `prune` removes only
-terminal `found`, `exhausted`, and `failed` sessions. Active and interrupted
-sessions are retained. OS file locks prevent concurrent deletion or execution,
-and interrupted sessions retain their restore material.
+`delete`、`prune` 需要交互确认（或 `--yes`）；`prune` 只删除终态的
+`found`、`exhausted`、`failed` 会话，运行中和中断会话默认保留。操作使用
+OS 文件锁防止并发删除/执行；中断会话会保留恢复材料。
 
-## Smart Recovery Workflow
+## 智能流程与 API
 
-The smart orchestrator applies one password-length range across a fixed sequence:
+智能编排器按以下顺序运行，并对所有阶段应用同一长度范围：
 
-1. Search the bundled 10-million-entry common-password dictionary.
-2. Apply high-value mutations: case changes, capitalization, common numeric and symbol suffixes, and basic leet substitutions.
-3. Generate masks for digits, lowercase letters, uppercase letters, and a capitalized word body followed by two digits.
-4. Finish with bounded `alnum` brute force without silently increasing the requested maximum length.
+1. 内置 1000 万常用密码字典。
+2. 固定高频规则变形，包括大小写、首字母大写、常用数字/符号追加及基础 leet 替换。
+3. 按长度生成纯数字、纯小写、纯大写，以及“首字母大写 + 小写主体 + 两位数字”掩码。
+4. 最后执行限定长度的 `alnum` 穷举，不自动扩大最大长度。
 
-The Python API exposes the same workflow:
+除零参数向导外，也可通过 Python API 调用：
 
 ```python
 from pathlib import Path
@@ -229,17 +224,17 @@ if result.password is not None:
     print(result.password)
 ```
 
-Smart-session identity includes the PDF, bundled dictionary, mutation-rule version, and password-length range. Only an explicit backend interruption resumes the current stage; ordinary runtime failures restart that stage on the next run, while completed stages remain skipped.
+智能状态会校验 PDF、内置字典、规则版本和长度范围。只有后端明确返回中断状态时才恢复当前阶段；普通运行异常会在下次从该阶段重新开始，已经耗尽的阶段仍会跳过。
 
-## GPU and hashcat Setup
+## GPU/hashcat 配置
 
-The one-command installer places the verified, pinned GPU tool package in `downloads/gpu-tools/`, but does not change the calling PowerShell session's `PATH`. The tool discovers hashcat and `pdf2john` in this order; this explains existing manual configuration, not a required post-installation setup step:
+一键安装会将已校验的固定 GPU 工具包安装到 `downloads/gpu-tools/`，但不会修改调用者 PowerShell 的 `PATH`。工具仍按以下顺序寻找 hashcat 与 pdf2john；这是已有手工配置的发现顺序说明，不是安装后必须执行的配置：
 
-1. `PDF_PASSWORD_RECOVERY_HASHCAT` and `PDF_PASSWORD_RECOVERY_PDF2JOHN` environment variables.
-2. The current `PATH`.
-3. `downloads/gpu-tools/` in a development checkout.
+1. 环境变量 `PDF_PASSWORD_RECOVERY_HASHCAT`、`PDF_PASSWORD_RECOVERY_PDF2JOHN`。
+2. 当前 `PATH`。
+3. 开发仓库的 `downloads/gpu-tools/`。
 
-Use the following commands only to troubleshoot an installation or GPU run; they are not required for the one-command installation:
+以下命令仅用于安装或 GPU 运行异常时的故障排查，并非一键安装的必需步骤：
 
 ```powershell
 Push-Location .\downloads\gpu-tools\hashcat-7.1.2; try { & .\hashcat.exe -I } finally { Pop-Location }
@@ -247,62 +242,62 @@ Push-Location .\downloads\gpu-tools\hashcat-7.1.2; try { & .\hashcat.exe -I } fi
 .\.venv\Scripts\python.exe -c "from pdf_password_recovery.backends.hashcat import discover_toolchain; print(discover_toolchain())"
 ```
 
-The hashcat backend selects GPU-class devices only. When both a discrete GPU and a unified-memory integrated GPU are detected, it prefers the discrete device. With `--backend auto`, fallback to CPU happens only before candidate processing starts. With `--backend hashcat`, missing tools, unsupported PDF modes, or incompatible GPU configuration are reported as errors instead of silently falling back.
+hashcat 固定使用 GPU 类型设备。若同时检测到独显和共享内存核显，会优先选择非共享显存设备。`--backend auto` 只会在候选开始前回退 CPU；显式指定 `--backend hashcat` 时，GPU 工具或兼容模式不可用会直接报错。
 
-For the first real GPU task, explicitly use `--backend hashcat` so toolchain or compatibility errors are visible:
+首次执行真实 GPU 任务时，建议显式指定 `--backend hashcat`，让工具或兼容性问题直接显示：
 
 ```powershell
 .\.venv\Scripts\python.exe -m pdf_password_recovery protected.pdf --attack dictionary --wordlist words.txt --backend hashcat
 ```
 
-## Interrupt and Resume
+## 中断与恢复
 
-Advanced CLI runs can use an explicit session name:
+高级 CLI 使用安全的会话名保存状态：
 
 ```powershell
 .\.venv\Scripts\python.exe -m pdf_password_recovery protected.pdf --attack brute --charset digits `
   --min-length 1 --max-length 8 --backend cpu --session numeric
 ```
 
-After stopping with `Ctrl+C`, resume with the same PDF, attack configuration, and session name:
+按 `Ctrl+C` 后，使用完全相同的 PDF、攻击参数和会话名恢复：
 
 ```powershell
 .\.venv\Scripts\python.exe -m pdf_password_recovery protected.pdf --attack brute --charset digits `
   --min-length 1 --max-length 8 --backend cpu --session numeric --resume
 ```
 
-Resume validation checks the PDF, wordlist, and attack configuration fingerprints. Do not replace input files or change search parameters before resuming.
+恢复过程会校验 PDF、字典和攻击配置指纹。不要在恢复前替换输入文件或改变搜索参数。
 
-## Bundled Wordlist
+## 内置字典来源
 
-The bundled dictionary comes from SecLists commit `066f6c8b8339fb5c10ffeca1d2f845d054081974`:
+内置字典来自 SecLists，并固定到提交 `066f6c8b8339fb5c10ffeca1d2f845d054081974`：
 
-- Source: `Passwords/Common-Credentials/Pwdb_top-10000000.txt`
-- Entries: `10,000,000`
-- Size: `94,461,698` bytes
-- SHA-256: `18dc49ca32b62455a61e3398f4ab9f93eb700ff142fa0d4b9fd11a727f3b80e4`
-- License: SecLists MIT License, included with the package data
+- 文件：`Passwords/Common-Credentials/Pwdb_top-10000000.txt`
+- 行数：`10,000,000`
+- 大小：`94,461,698` 字节
+- SHA-256：`18dc49ca32b62455a61e3398f4ab9f93eb700ff142fa0d4b9fd11a727f3b80e4`
+- 许可证：SecLists MIT License，随 package data 一同提供
 
-The wordlist ships with the package. It is neither downloaded at runtime nor expanded fully into memory.
+字典随安装包提供，运行时不会联网下载，也不会在内存中整体展开。
 
-## CLI Reference
+## 常用参数
 
-| Option                              | Description                                        |
-| ----------------------------------- | -------------------------------------------------- |
-| `--attack`                        | `dictionary`, `mask`, or `brute`             |
-| `--backend`                       | `auto`, `hashcat`, or `cpu`                  |
-| `--wordlist`                      | Dictionary file path                               |
-| `--encoding`                      | Dictionary encoding; defaults to UTF-8             |
-| `--mask`                          | hashcat-style mask                                 |
-| `--charset`                       | Preset or custom character set                     |
-| `--min-length` / `--max-length` | Inclusive brute-force length range                 |
-| `--workers`                       | CPU worker count; does not control GPU concurrency |
-| `--session`                       | Checkpoint or hashcat session name                 |
-| `--resume`                        | Resume a named session; requires`--session`      |
-| `--output`                        | Atomically write the recovered password to a file  |
-| `--yes`                           | Skip confirmation in non-interactive environments  |
+| 参数                                | 说明                                    |
+| ----------------------------------- | --------------------------------------- |
+| `--attack`                        | `dictionary`、`mask` 或 `brute`   |
+| `--backend`                       | `auto`、`hashcat` 或 `cpu`        |
+| `--wordlist`                      | 字典文件路径                            |
+| `--encoding`                      | 字典编码，默认 UTF-8                    |
+| `--mask`                          | hashcat 风格掩码                        |
+| `--charset`                       | 预设或自定义字符集                      |
+| `--min-length` / `--max-length` | 穷举长度闭区间                          |
+| `--workers`                       | CPU 工作进程数；不控制 GPU 并发         |
+| `--session`                       | 检查点或 hashcat 会话名                 |
+| `--resume`                        | 恢复指定会话，必须同时提供`--session` |
+| `--output`                        | 成功后原子写入密码文件                  |
+| `--yes`                           | 非交互环境跳过确认                      |
 
-## Development and Validation
+## 开发与验证
 
 ```powershell
 python -m pytest --basetemp .pytest-task5
@@ -311,24 +306,24 @@ python -m ruff format --check .
 python -m build
 ```
 
-External-tool integration tests are skipped by default. Run them only after confirming that hashcat, `pdf2john`, and a compatible GPU are available:
+外部工具集成测试默认跳过。确认本机 hashcat、pdf2john 和 GPU 环境可用后执行：
 
 ```powershell
 $env:RUN_EXTERNAL_TOOL_TESTS = "1"
 python -m pytest tests\test_external_tools.py -v
 ```
 
-## Security and Data Handling
+## 安全与数据
 
-- The tool reads only the local PDF and wordlist paths explicitly provided to it.
-- It contains no network scanning, remote target discovery, bulk target search, stealth, or detection-evasion functionality.
-- Checkpoints and smart-session state never store a recovered plaintext password.
-- JSONL events and session summaries never store plaintext passwords, extracted `$pdf$` hashes, or hints content.
-- Human-mode recovery prints the password to stdout by default; it is written to a file only when `--output` is specified. JSON mode remains password-free.
-- Hashcat always uses `--potfile-disable`.
-- Session state defaults to the operating system's per-user data directory. Override it with `PDF_PASSWORD_RECOVERY_STATE_DIR` when needed.
-- Use is limited to local PDF files that you own or are authorized to access; there is no network or remote-target workflow.
+- 只读取命令中明确提供的本地 PDF 和字典文件。
+- 不包含网络扫描、远程目标发现、批量目标搜索、隐蔽或规避检测功能。
+- 检查点与智能状态不保存找到的明文密码。
+- JSONL 事件和会话摘要不保存明文密码、提取出的 `$pdf$` 哈希或提示文件内容。
+- 人类可读模式默认将密码输出到 stdout；只有指定 `--output` 时才写入文件。JSON 模式始终不输出密码。
+- hashcat 始终使用 `--potfile-disable`。
+- 会话和状态默认保存在系统用户数据目录，可用 `PDF_PASSWORD_RECOVERY_STATE_DIR` 指定其他位置。
+- 仅限处理自己拥有或已获授权的本地 PDF；项目不提供网络或远程目标流程。
 
 ## License
 
-Project code is released under the MIT License. SecLists licensing and provenance information for the bundled dictionary are stored in `src/pdf_password_recovery/data/`.
+项目代码采用 MIT License。内置 SecLists 字典的许可证与来源信息位于 `src/pdf_password_recovery/data/`。
